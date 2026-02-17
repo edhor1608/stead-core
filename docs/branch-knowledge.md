@@ -50,3 +50,30 @@
 
 ### Lessons learned
 - Round-trip tests uncovered real lossiness early (progress events); snapshot-only tests would not.
+
+## Milestone 3: Claude Adapter (Import/Export/Subagent Merge)
+
+### Problem solved
+- Parse Claude Code JSONL sessions into canonical events, including mixed content formats.
+- Merge main + subagent streams into a deterministic single timeline.
+- Export canonical sessions back to Claude-compatible JSONL and verify round-trip.
+
+### What was implemented
+- `ClaudeAdapter` with:
+  - discovery of main sessions under `projects/**/*.jsonl` (excluding `subagents` for listing),
+  - import by session id with automatic subagent merge,
+  - import from a single file with explicit stream id,
+  - export to Claude-style event lines.
+- Test suite additions:
+  - session list/import integration tests,
+  - subagent merge behavior contract,
+  - round-trip test,
+  - export snapshot test.
+
+### Key decisions
+- Main stream id is `main`; subagents are tagged as `subagent:<file_stem>`.
+- Claude `message.content` supports both string and array forms and is normalized event-by-event.
+- Progress entries are modeled as canonical `system_progress` events.
+
+### Lessons learned
+- Subagent files can share the same Claude `sessionId`; merging must rely on both session id and stream origin.
