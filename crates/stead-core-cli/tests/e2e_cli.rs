@@ -303,6 +303,38 @@ fn sync_imports_codex_and_claude_sessions_into_repo_store() {
 }
 
 #[test]
+fn sync_accepts_leaf_backend_directories() {
+    let repo = TempDir::new().unwrap();
+    let codex_home = TempDir::new().unwrap();
+    let claude_home = TempDir::new().unwrap();
+
+    let codex_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/codex");
+    let claude_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/claude");
+    copy_tree(&codex_fixture, codex_home.path());
+    copy_tree(&claude_fixture, claude_home.path());
+
+    stead_core()
+        .args([
+            "sync",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--codex-base",
+            codex_home.path().join("sessions").to_str().unwrap(),
+            "--claude-base",
+            claude_home.path().join("projects").to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let sessions = list_canonical_sessions(repo.path());
+    assert!(!sessions.is_empty());
+    assert!(sessions.iter().any(|s| s["source"]["backend"] == "codex"));
+    assert!(sessions.iter().any(|s| s["source"]["backend"] == "claude_code"));
+}
+
+#[test]
 fn materialize_updates_canonical_native_refs_and_writes_target_session() {
     let repo = TempDir::new().unwrap();
     let codex_home = TempDir::new().unwrap();

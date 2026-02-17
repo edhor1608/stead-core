@@ -132,3 +132,32 @@
 
 ### Lessons learned
 - Runtime orchestration needs explicit native ref tracking to avoid backend/session-ID ambiguity.
+
+## Milestone 6: Live Session Compatibility Hardening
+
+### Problem solved
+- Real local session directories from current Codex/Claude CLI runs were not discoverable when users passed direct leaf roots (`~/.codex/sessions`, `~/.claude/projects`).
+- Claude discovery/import could fail globally when unrelated session files had malformed JSON or unsupported message content shapes.
+
+### What was implemented
+- Adapter root normalization:
+  - Codex accepts both home root and direct `sessions` root.
+  - Claude accepts both home root and direct `projects` root.
+- Discovery/import resilience:
+  - `list_sessions` and `import_session` now skip unparseable unrelated files instead of failing the whole operation.
+- Claude content parsing hardening:
+  - support for raw/unknown `message.content` shapes via fallback variant.
+  - support non-string `tool_result.content` by preserving JSON as string output.
+- New regression tests:
+  - adapter tests for leaf base dirs,
+  - malformed-file tolerance tests,
+  - Claude non-string `tool_result.content` import test,
+  - CLI e2e test for `sync` with leaf backend directories.
+
+### Key decisions
+- Favor graceful degradation for discovery paths: skip invalid files, keep parsing valid sessions.
+- Keep canonical fidelity for odd tool-result payloads by stringifying unknown JSON content instead of dropping events.
+
+### Lessons learned
+- Local user histories contain heterogeneous historical formats; strict per-file parsing in discovery paths is too brittle.
+- Compatibility tests must include real-world path variants (`root` vs `leaf`) to avoid “works on fixtures only” regressions.

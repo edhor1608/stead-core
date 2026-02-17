@@ -36,9 +36,10 @@ impl CodexAdapter {
 
     pub fn import_session(&self, session_id: &str) -> Result<SteadSession, AdapterError> {
         for path in self.session_files() {
-            let summary = parse_summary(&path)?;
-            if summary.native_id == session_id {
-                return self.import_from_file(&path);
+            if let Ok(summary) = parse_summary(&path) {
+                if summary.native_id == session_id {
+                    return self.import_from_file(&path);
+                }
             }
         }
         Err(AdapterError::SessionNotFound(session_id.to_string()))
@@ -263,7 +264,15 @@ impl CodexAdapter {
     }
 
     fn session_files(&self) -> Vec<PathBuf> {
-        let sessions_root = self.base_dir.join("sessions");
+        let sessions_root = if self
+            .base_dir
+            .file_name()
+            .is_some_and(|v| v.to_string_lossy().eq_ignore_ascii_case("sessions"))
+        {
+            self.base_dir.clone()
+        } else {
+            self.base_dir.join("sessions")
+        };
         if !sessions_root.exists() {
             return Vec::new();
         }

@@ -26,11 +26,12 @@ impl ClaudeAdapter {
     pub fn list_sessions(&self) -> Result<Vec<NativeSessionRef>, AdapterError> {
         let mut out = Vec::new();
         for file in self.main_session_files() {
-            let summary = parse_summary(&file)?;
-            if out.iter().any(|it: &NativeSessionRef| it.native_id == summary.native_id) {
-                continue;
+            if let Ok(summary) = parse_summary(&file) {
+                if out.iter().any(|it: &NativeSessionRef| it.native_id == summary.native_id) {
+                    continue;
+                }
+                out.push(summary);
             }
-            out.push(summary);
         }
         out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(out)
@@ -39,10 +40,11 @@ impl ClaudeAdapter {
     pub fn import_session(&self, session_id: &str) -> Result<SteadSession, AdapterError> {
         let mut main_file: Option<PathBuf> = None;
         for file in self.main_session_files() {
-            let summary = parse_summary(&file)?;
-            if summary.native_id == session_id {
-                main_file = Some(file);
-                break;
+            if let Ok(summary) = parse_summary(&file) {
+                if summary.native_id == session_id {
+                    main_file = Some(file);
+                    break;
+                }
             }
         }
 
@@ -224,7 +226,7 @@ impl ClaudeAdapter {
                                                 payload: EventPayload::ToolResult {
                                                     call_id: item.tool_use_id.unwrap_or_default(),
                                                     ok: !item.is_error.unwrap_or(false),
-                                                    output_text: item.content,
+                                                    output_text: value_to_text(item.content),
                                                     error_text: None,
                                                 },
                                                 raw_vendor_payload: raw_lines
@@ -237,6 +239,9 @@ impl ClaudeAdapter {
                                         _ => {}
                                     }
                                 }
+                            }
+                            Content::Raw(value) => {
+                                let _ = value;
                             }
                         }
                     }
@@ -313,7 +318,15 @@ impl ClaudeAdapter {
     }
 
     fn main_session_files(&self) -> Vec<PathBuf> {
-        let root = self.base_dir.join("projects");
+        let root = if self
+            .base_dir
+            .file_name()
+            .is_some_and(|v| v.to_string_lossy().eq_ignore_ascii_case("projects"))
+        {
+            self.base_dir.clone()
+        } else {
+            self.base_dir.join("projects")
+        };
         if !root.exists() {
             return Vec::new();
         }
@@ -429,6 +442,9 @@ fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
                     Content::Items(items) => {
                         title = items.into_iter().find_map(|item| item.text);
                     }
+                    Content::Raw(value) => {
+                        let _ = value;
+                    }
                 }
             }
         }
@@ -451,6 +467,14 @@ fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
 fn parse_ts(raw: Option<&str>) -> Option<DateTime<Utc>> {
     raw.and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.with_timezone(&Utc))
+}
+
+fn value_to_text(value: Option<Value>) -> Option<String> {
+    match value {
+        Some(Value::String(text)) => Some(text),
+        Some(other) => Some(other.to_string()),
+        None => None,
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -477,6 +501,7 @@ struct ClaudeMessage {
 enum Content {
     Text(String),
     Items(Vec<ContentItem>),
+    Raw(Value),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -488,6 +513,6 @@ struct ContentItem {
     name: Option<String>,
     input: Option<Value>,
     tool_use_id: Option<String>,
-    content: Option<String>,
+    content: Option<Value>,
     is_error: Option<bool>,
 }
