@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stead.dev/schemas/session.v0.1.0.schema.json",
+  "title": "Stead Session Standard v0.1.0",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "session_uid",
+    "source",
+    "metadata",
+    "events",
+    "raw_vendor_payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "session_uid": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "backend",
+        "original_session_id",
+        "source_files",
+        "imported_at",
+        "adapter_version"
+      ],
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": [
+            "codex",
+            "claude_code"
+          ]
+        },
+        "original_session_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "imported_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "adapter_version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "project_root",
+        "created_at",
+        "updated_at",
+        "tags"
+      ],
+      "properties": {
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_root": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "event_uid",
+          "stream_id",
+          "line_number",
+          "timestamp",
+          "kind",
+          "payload",
+          "raw_vendor_payload"
+        ],
+        "properties": {
+          "event_uid": {
+            "type": "string",
+            "minLength": 1
+          },
+          "stream_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "line_number": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sequence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "actor": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "payload": {
+            "type": "object"
+          },
+          "raw_vendor_payload": {},
+          "extensions": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "artifacts": {
+      "type": "array"
+    },
+    "capabilities": {
+      "type": "object"
+    },
+    "extensions": {
+      "type": "object"
+    },
+    "raw_vendor_payload": {}
+  },
+  "additionalProperties": true
+}
