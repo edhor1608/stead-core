@@ -143,6 +143,9 @@
 - Adapter root normalization:
   - Codex accepts both home root and direct `sessions` root.
   - Claude accepts both home root and direct `projects` root.
+- Sync repo scoping:
+  - `sync` now prefers sessions whose `project_root` matches the target repo path.
+  - legacy fallback remains: if no matches exist for a backend, sync keeps previous behavior and imports all discovered sessions.
 - Discovery/import resilience:
   - `list_sessions` and `import_session` now skip unparseable unrelated files instead of failing the whole operation.
 - Claude content parsing hardening:
@@ -152,7 +155,7 @@
   - adapter tests for leaf base dirs,
   - malformed-file tolerance tests,
   - Claude non-string `tool_result.content` import test,
-  - CLI e2e test for `sync` with leaf backend directories.
+  - CLI e2e tests for `sync` with leaf backend directories and repo-scoped filtering behavior.
 
 ### Key decisions
 - Favor graceful degradation for discovery paths: skip invalid files, keep parsing valid sessions.
