@@ -1,0 +1,2 @@
+{"timestamp":"2026-02-16T20:00:00Z","type":"session_meta","payload":{"id":"s-old","cwd":"/Users/jonas/repos/stead","model_provider":"openai","git":{"branch":"main","commit_hash":"abc123","repository_url":"https://github.com/edhor1608/stead.git"}}}
+{"timestamp":"2026-02-16T20:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Old session prompt"}]}}
