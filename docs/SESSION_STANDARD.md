@@ -55,3 +55,18 @@ Canonical sort rule:
 - Raw original lines are preserved under `raw_vendor_payload` for adapter debugging and loss audits.
 - Unknown/extra data can be stored in `extensions`.
 - Export reports include `warnings` and `losses` for explicit fidelity reporting.
+
+## Runtime mapping for shared sessions
+
+Repo-local canonical sessions are stored under:
+- `.stead-core/sessions/*.json`
+
+Native backend projections are tracked in:
+- `extensions.native_refs.codex`
+- `extensions.native_refs.claude`
+
+Each native ref stores:
+- `session_id`
+- `path`
+
+This mapping allows a single canonical `session_uid` to materialize and resume across both backends.

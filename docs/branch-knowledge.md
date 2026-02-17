@@ -104,3 +104,31 @@
 
 ### Lessons learned
 - CLI alias compatibility (`--in` vs `--input`) should be asserted in tests to avoid accidental interface breaks.
+
+## Milestone 5: Repo Sync + Materialize + Resume
+
+### Problem solved
+- Enable practical shared-session workflow at canonical level:
+  - sync backend sessions into repo canonical store,
+  - materialize canonical sessions into target backend native formats,
+  - resume backend sessions from canonical mapping with a new prompt.
+
+### What was implemented
+- New CLI commands:
+  - `sync`
+  - `materialize`
+  - `resume`
+- Repo-local canonical store:
+  - `.stead-core/sessions/*.json`
+- Native session reference tracking under:
+  - `extensions.native_refs.codex`
+  - `extensions.native_refs.claude`
+- E2E tests validating sync/materialize/resume flows.
+
+### Key decisions
+- Resume command can use a test runner override via `STEAD_CORE_RUNNER` for deterministic e2e testing.
+- If a native projection is missing, `resume` can materialize first when `--base-dir` is provided.
+- Canonical session identity stays stable; backend projections are tracked as refs rather than replacing canonical IDs.
+
+### Lessons learned
+- Runtime orchestration needs explicit native ref tracking to avoid backend/session-ID ambiguity.

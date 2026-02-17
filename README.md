@@ -5,7 +5,7 @@ Vendor-neutral core for importing, normalizing, and exporting local AI coding se
 `stead-core` provides:
 - a canonical, versioned session model (`schemas/session.v0.1.0.schema.json`),
 - adapters for Codex and Claude Code local session formats,
-- a CLI proving end-to-end workflows (`list`, `import`, `export`, `convert`).
+- a CLI proving end-to-end workflows (`list`, `import`, `export`, `convert`, `sync`, `materialize`, `resume`).
 
 ## Why this standard exists
 
@@ -76,4 +76,34 @@ stead-core convert \
   --target-base ~/.claude \
   --session <native-session-id> \
   --out /tmp/converted-claude.jsonl
+```
+
+Sync all local backend sessions into a repo-local canonical store:
+
+```bash
+stead-core sync \
+  --repo /path/to/repo \
+  --codex-base ~/.codex \
+  --claude-base ~/.claude
+```
+
+Materialize a canonical session into a target backend-native session:
+
+```bash
+stead-core materialize \
+  --repo /path/to/repo \
+  --session <canonical-session-uid> \
+  --to claude \
+  --base-dir ~/.claude \
+  --out /tmp/materialized-claude.jsonl
+```
+
+Resume backend session from canonical mapping with a new prompt:
+
+```bash
+stead-core resume \
+  --repo /path/to/repo \
+  --session <canonical-session-uid> \
+  --backend codex \
+  --prompt "Continue from previous state"
 ```
