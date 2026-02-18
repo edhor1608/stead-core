@@ -205,7 +205,9 @@ pub struct SteadSession {
 pub enum SteadSessionError {
     #[error("event `{event_uid}` is missing sequence")]
     MissingSequence { event_uid: String },
-    #[error("event sequence is not contiguous at index {index}: expected {expected}, found {found}")]
+    #[error(
+        "event sequence is not contiguous at index {index}: expected {expected}, found {found}"
+    )]
     InvalidSequence {
         index: usize,
         expected: u64,
@@ -235,7 +237,7 @@ impl SteadSession {
 }
 
 pub fn canonical_sort_events(events: &mut [SteadEvent]) {
-    events.sort_by(|a, b| canonical_event_cmp(a, b));
+    events.sort_by(canonical_event_cmp);
     for (idx, event) in events.iter_mut().enumerate() {
         event.sequence = Some(idx as u64);
     }
