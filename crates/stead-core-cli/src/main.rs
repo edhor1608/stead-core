@@ -525,13 +525,11 @@ fn backend_key(backend: Backend) -> &'static str {
 }
 
 fn scope_sessions_to_repo(repo: &Path, sessions: Vec<NativeSessionRef>) -> Vec<NativeSessionRef> {
-    let repo_scoped: Vec<_> = sessions
-        .iter()
-        .filter(|session| session_matches_repo(repo, session.project_root.as_deref()))
-        .cloned()
-        .collect();
+    let (repo_scoped, others): (Vec<_>, Vec<_>) = sessions
+        .into_iter()
+        .partition(|session| session_matches_repo(repo, session.project_root.as_deref()));
     if repo_scoped.is_empty() {
-        sessions
+        others
     } else {
         repo_scoped
     }

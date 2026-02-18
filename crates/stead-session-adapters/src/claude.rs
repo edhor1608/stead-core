@@ -241,7 +241,34 @@ impl ClaudeAdapter {
                                 }
                             }
                             Content::Raw(value) => {
-                                let _ = value;
+                                let text = value.to_string();
+                                if message.role == "user" && title.is_none() {
+                                    title = Some(text.clone());
+                                }
+                                let kind = if message.role == "assistant" {
+                                    EventKind::MessageAssistant
+                                } else {
+                                    EventKind::MessageUser
+                                };
+                                events.push(SteadEvent {
+                                    event_uid: format!(
+                                        "{}-{}",
+                                        entry.uuid.clone().unwrap_or_else(|| "ev".to_string()),
+                                        line_number
+                                    ),
+                                    stream_id: stream_id.to_string(),
+                                    line_number: line_number as u64,
+                                    sequence: None,
+                                    timestamp: ts,
+                                    kind,
+                                    actor: None,
+                                    payload: EventPayload::text(text),
+                                    raw_vendor_payload: raw_lines
+                                        .last()
+                                        .cloned()
+                                        .unwrap_or_else(|| json!({})),
+                                    extensions: Map::new(),
+                                });
                             }
                         }
                     }
