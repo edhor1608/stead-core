@@ -1,5 +1,6 @@
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
+use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
@@ -43,6 +44,18 @@ fn list_canonical_sessions(repo_root: &Path) -> Vec<serde_json::Value> {
     out
 }
 
+fn parse_jsonl_lines(raw: &str) -> Vec<Value> {
+    raw.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect()
+}
+
+fn assert_jsonl_has_type(lines: &[Value], expected_type: &str) {
+    assert!(lines.iter().any(|line| {
+        line.get("type") == Some(&Value::String(expected_type.to_string()))
+    }));
+}
 #[test]
 fn list_sessions_from_codex_backend_as_json() {
     let temp = TempDir::new().unwrap();
@@ -130,7 +143,8 @@ fn convert_codex_to_claude_is_e2e_runnable() {
 
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"assistant\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "assistant");
 }
 
 #[test]
@@ -169,7 +183,8 @@ fn convert_claude_to_codex_is_e2e_runnable() {
 
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"session_meta\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "session_meta");
 }
 
 #[test]
@@ -218,7 +233,8 @@ fn export_canonical_to_codex_is_e2e_runnable() {
         .success();
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"response_item\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "response_item");
 }
 
 #[test]
@@ -267,7 +283,8 @@ fn export_canonical_to_claude_is_e2e_runnable() {
         .success();
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"assistant\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "assistant");
 }
 
 #[test]
@@ -419,12 +436,9 @@ fn resume_uses_backend_resume_flag_with_prompt() {
     )
     .unwrap();
     let mut perms = std::fs::metadata(&runner_script).unwrap().permissions();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&runner_script, perms).unwrap();
-    }
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&runner_script, perms).unwrap();
 
     stead_core()
         .env("STEAD_CORE_RUNNER", runner_script.to_str().unwrap())

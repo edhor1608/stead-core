@@ -181,7 +181,14 @@ fn run_list(backend: Backend, base_dir: PathBuf, json: bool) -> Result<()> {
         Backend::Claude => ClaudeAdapter::from_base_dir(base_dir).list_sessions()?,
     };
     if json {
-        println!("{}", serde_json::to_string(&sessions)?);
+        let serialized = serde_json::to_string(&sessions).with_context(|| {
+            format!(
+                "failed to serialize sessions to JSON for backend {:?} ({} sessions)",
+                backend,
+                sessions.len()
+            )
+        })?;
+        println!("{serialized}");
     } else {
         for session in sessions {
             println!("{} {}", session.native_id, session.file_path.display());
@@ -197,6 +204,13 @@ fn run_import(from: Backend, base_dir: PathBuf, session: &str, out: PathBuf) -> 
     };
     let serialized =
         serde_json::to_string_pretty(&imported).context("failed to serialize canonical session")?;
+    let parent = out
+        .parent()
+        .with_context(|| format!("invalid output path: {}", out.display()))?;
+    if !parent.as_os_str().is_empty() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create output directory {}", parent.display()))?;
+    }
     std::fs::write(&out, serialized)
         .with_context(|| format!("failed to write canonical session to {}", out.display()))?;
     Ok(())
@@ -207,6 +221,13 @@ fn run_export(to: Backend, base_dir: PathBuf, input: PathBuf, out: PathBuf) -> R
         .with_context(|| format!("failed to read canonical input {}", input.display()))?;
     let session: SteadSession = serde_json::from_str(&raw)
         .with_context(|| format!("invalid canonical JSON in {}", input.display()))?;
+    let parent = out
+        .parent()
+        .with_context(|| format!("invalid output path: {}", out.display()))?;
+    if !parent.as_os_str().is_empty() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create output directory {}", parent.display()))?;
+    }
     match to {
         Backend::Codex => {
             CodexAdapter::from_base_dir(base_dir).export_session(&session, &out)?;
@@ -230,6 +251,13 @@ fn run_convert(
         Backend::Codex => CodexAdapter::from_base_dir(source_base).import_session(session)?,
         Backend::Claude => ClaudeAdapter::from_base_dir(source_base).import_session(session)?,
     };
+    let parent = out
+        .parent()
+        .with_context(|| format!("invalid output path: {}", out.display()))?;
+    if !parent.as_os_str().is_empty() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create output directory {}", parent.display()))?;
+    }
     match to {
         Backend::Codex => {
             CodexAdapter::from_base_dir(target_base).export_session(&imported, &out)?;
@@ -402,10 +430,15 @@ fn canonical_store_dir(repo: &Path) -> PathBuf {
 }
 
 fn canonical_session_path(repo: &Path, session_uid: &str) -> PathBuf {
-    let file_name: String = session_uid
+    let sanitized: String = session_uid
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
         .collect();
+    let file_name = if sanitized.is_empty() {
+        format!("session-{}", short_hash(session_uid))
+    } else {
+        format!("{}-{}", sanitized, short_hash(session_uid))
+    };
     canonical_store_dir(repo).join(format!("{}.json", file_name))
 }
 
@@ -508,7 +541,7 @@ fn default_materialized_path(base_dir: &Path, repo: &Path, backend: Backend, nat
             .join("auto")
             .join(format!("rollout-{}-{}.jsonl", unix_secs, native_id)),
         Backend::Claude => {
-            let slug = repo.display().to_string().replace('/', "-");
+            let slug = repo.display().to_string().replace(['/', '\\'], "-");
             base_dir.join("projects").join(slug).join(format!("{}.jsonl", native_id))
         }
     }
