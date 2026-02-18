@@ -2,13 +2,13 @@ use crate::{AdapterError, ExportReport, NativeSessionRef};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::fs::File;
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 use stead_session_model::{
     BackendKind, EventKind, EventPayload, SessionMetadata, SessionSource, SteadEvent, SteadSession,
     build_session_uid, canonical_sort_events, schema_version,
 };
-use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
@@ -36,10 +36,10 @@ impl CodexAdapter {
 
     pub fn import_session(&self, session_id: &str) -> Result<SteadSession, AdapterError> {
         for path in self.session_files() {
-            if let Ok(summary) = parse_summary(&path) {
-                if summary.native_id == session_id {
-                    return self.import_from_file(&path);
-                }
+            if let Ok(summary) = parse_summary(&path)
+                && summary.native_id == session_id
+            {
+                return self.import_from_file(&path);
             }
         }
         Err(AdapterError::SessionNotFound(session_id.to_string()))
@@ -62,8 +62,9 @@ impl CodexAdapter {
             if line.trim().is_empty() {
                 continue;
             }
-            let envelope: CodexEnvelope = serde_json::from_str(&line)?;
-            raw_lines.push(serde_json::to_value(&envelope)?);
+            let raw_line: Value = serde_json::from_str(&line)?;
+            let envelope: CodexEnvelope = serde_json::from_value(raw_line.clone())?;
+            raw_lines.push(raw_line.clone());
 
             let ts = parse_ts(envelope.timestamp.as_deref()).unwrap_or_else(Utc::now);
             if created.is_none() || created.is_some_and(|v| ts < v) {
@@ -86,13 +87,13 @@ impl CodexAdapter {
                 }
                 "response_item" => {
                     if let Some(payload) = envelope.payload {
-                        let raw_payload = serde_json::to_value(&payload).unwrap_or_else(|_| json!({}));
                         let item_type = payload.item_type.as_deref().unwrap_or_default();
                         match item_type {
                             "message" => {
                                 let role = payload.role.as_deref().unwrap_or_default();
-                                for (text_index, text) in
-                                    extract_message_texts(&payload.content).into_iter().enumerate()
+                                for (text_index, text) in extract_message_texts(&payload.content)
+                                    .into_iter()
+                                    .enumerate()
                                 {
                                     if role == "user" && first_user_text.is_none() {
                                         first_user_text = Some(text.clone());
@@ -111,10 +112,7 @@ impl CodexAdapter {
                                         kind,
                                         actor: None,
                                         payload: EventPayload::text(text),
-                                        raw_vendor_payload: json!({
-                                            "type": "response_item",
-                                            "payload": raw_payload
-                                        }),
+                                        raw_vendor_payload: raw_line.clone(),
                                         extensions: Map::new(),
                                     });
                                 }
@@ -143,10 +141,7 @@ impl CodexAdapter {
                                     kind: EventKind::ToolCall,
                                     actor: None,
                                     payload: EventPayload::tool_call(name, arguments),
-                                    raw_vendor_payload: json!({
-                                        "type": "response_item",
-                                        "payload": raw_payload
-                                    }),
+                                    raw_vendor_payload: raw_line.clone(),
                                     extensions: Map::new(),
                                 });
                             }
@@ -165,10 +160,7 @@ impl CodexAdapter {
                                         output_text: payload.output.clone(),
                                         error_text: None,
                                     },
-                                    raw_vendor_payload: json!({
-                                        "type": "response_item",
-                                        "payload": raw_payload
-                                    }),
+                                    raw_vendor_payload: raw_line.clone(),
                                     extensions: Map::new(),
                                 });
                             }
@@ -177,26 +169,23 @@ impl CodexAdapter {
                     }
                 }
                 "event_msg" => {
-                    if let Some(payload) = envelope.payload {
-                        if payload.item_type.as_deref() == Some("token_count") {
-                            events.push(SteadEvent {
-                                event_uid: format!("event-{}", line_number),
-                                stream_id: "main".to_string(),
-                                line_number: line_number as u64,
-                                sequence: None,
-                                timestamp: ts,
-                                kind: EventKind::SystemProgress,
-                                actor: None,
-                                payload: EventPayload::Json {
-                                    value: json!({ "token_count": payload.info }),
-                                },
-                                raw_vendor_payload: json!({
-                                    "type": "event_msg",
-                                    "payload": payload
-                                }),
-                                extensions: Map::new(),
-                            });
-                        }
+                    if let Some(payload) = envelope.payload
+                        && payload.item_type.as_deref() == Some("token_count")
+                    {
+                        events.push(SteadEvent {
+                            event_uid: format!("event-{}", line_number),
+                            stream_id: "main".to_string(),
+                            line_number: line_number as u64,
+                            sequence: None,
+                            timestamp: ts,
+                            kind: EventKind::SystemProgress,
+                            actor: None,
+                            payload: EventPayload::Json {
+                                value: json!({ "token_count": payload.info }),
+                            },
+                            raw_vendor_payload: raw_line.clone(),
+                            extensions: Map::new(),
+                        });
                     }
                 }
                 _ => {}
@@ -250,10 +239,25 @@ impl CodexAdapter {
                 "model_provider": "unknown"
             }
         });
+        let session_meta = merge_with_raw_unknowns(
+            session_meta,
+            session
+                .raw_vendor_payload
+                .get("lines")
+                .and_then(|v| v.as_array())
+                .and_then(|lines| {
+                    lines
+                        .iter()
+                        .find(|line| line.get("type") == Some(&json!("session_meta")))
+                }),
+        );
         writeln!(file, "{}", serde_json::to_string(&session_meta)?)?;
 
         for event in &session.events {
-            let line = event_to_codex_line(event);
+            let line = merge_with_raw_unknowns(
+                event_to_codex_line(event),
+                Some(&event.raw_vendor_payload),
+            );
             writeln!(file, "{}", serde_json::to_string(&line)?)?;
         }
 
@@ -359,6 +363,48 @@ fn event_to_codex_line(event: &SteadEvent) -> Value {
     }
 }
 
+fn merge_with_raw_unknowns(generated: Value, raw: Option<&Value>) -> Value {
+    let Some(raw) = raw else {
+        return generated;
+    };
+    let (Some(raw_type), Some(generated_type)) = (
+        raw.get("type").and_then(|v| v.as_str()),
+        generated.get("type").and_then(|v| v.as_str()),
+    ) else {
+        return generated;
+    };
+    if raw_type != generated_type {
+        return generated;
+    }
+    merge_value_objects(raw.clone(), generated)
+}
+
+fn merge_value_objects(raw: Value, generated: Value) -> Value {
+    match (raw, generated) {
+        (Value::Object(mut raw_map), Value::Object(generated_map)) => {
+            for (key, generated_value) in generated_map {
+                let merged = match raw_map.remove(&key) {
+                    Some(raw_value) => merge_value_objects(raw_value, generated_value),
+                    None => generated_value,
+                };
+                raw_map.insert(key, merged);
+            }
+            Value::Object(raw_map)
+        }
+        (Value::Array(raw_values), Value::Array(generated_values)) => Value::Array(
+            generated_values
+                .into_iter()
+                .enumerate()
+                .map(|(index, generated_value)| match raw_values.get(index) {
+                    Some(raw_value) => merge_value_objects(raw_value.clone(), generated_value),
+                    None => generated_value,
+                })
+                .collect(),
+        ),
+        (_, generated_other) => generated_other,
+    }
+}
+
 fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
@@ -377,24 +423,23 @@ fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
         if updated.is_none() || updated.is_some_and(|v| ts > v) {
             updated = Some(ts);
         }
-        if envelope.kind == "session_meta" {
-            if let Some(payload) = envelope.payload.as_ref() {
-                if id.is_none() {
-                    id = payload.id.clone();
-                }
-                if project_root.is_none() {
-                    project_root = payload.cwd.clone();
-                }
+        if envelope.kind == "session_meta"
+            && let Some(payload) = envelope.payload.as_ref()
+        {
+            if id.is_none() {
+                id = payload.id.clone();
+            }
+            if project_root.is_none() {
+                project_root = payload.cwd.clone();
             }
         }
-        if envelope.kind == "response_item" && title.is_none() {
-            if let Some(payload) = envelope.payload.as_ref() {
-                if payload.item_type.as_deref() == Some("message")
-                    && payload.role.as_deref() == Some("user")
-                {
-                    title = extract_message_texts(&payload.content).into_iter().next();
-                }
-            }
+        if envelope.kind == "response_item"
+            && title.is_none()
+            && let Some(payload) = envelope.payload.as_ref()
+            && payload.item_type.as_deref() == Some("message")
+            && payload.role.as_deref() == Some("user")
+        {
+            title = extract_message_texts(&payload.content).into_iter().next();
         }
     }
 
