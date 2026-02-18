@@ -35,3 +35,12 @@ Roundtrip tests (`import -> export -> import`) assert behavioral fidelity on:
 - Scope is local disk formats only (no vendor API calls).
 - Two backends implemented first: Codex and Claude Code.
 - Exporters prioritize stable, parseable output over reproducing every vendor-specific field.
+
+## Runtime interoperability choice
+
+`sync` + `materialize` + `resume` are implemented as a repo-local orchestration layer:
+- canonical sessions live in repo state,
+- backend-native refs are tracked in canonical extensions,
+- resume is delegated to backend CLIs via `--resume <id>`.
+
+This keeps the core local-first and avoids backend API coupling while enabling practical cross-tool continuation.
