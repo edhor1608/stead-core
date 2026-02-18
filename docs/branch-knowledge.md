@@ -77,3 +77,30 @@
 
 ### Lessons learned
 - Subagent files can share the same Claude `sessionId`; merging must rely on both session id and stream origin.
+
+## Milestone 4: CLI + E2E Workflow Proof
+
+### Problem solved
+- Provide an end-user interface to run real import/export/convert flows without writing code.
+- Prove all core workflows are runnable through the binary.
+
+### What was implemented
+- `stead-core` CLI commands:
+  - `sessions list`
+  - `import`
+  - `export`
+  - `convert`
+- E2E CLI test suite covering:
+  - backend listing,
+  - import to canonical JSON,
+  - export from canonical JSON,
+  - codex -> claude conversion,
+  - claude -> codex conversion.
+- Docs for standard, rationale, and usage.
+
+### Key decisions
+- `export` supports both `--in` and `--input` for script compatibility.
+- CLI remains local-first with explicit `--base-dir` paths for deterministic tests and ops.
+
+### Lessons learned
+- CLI alias compatibility (`--in` vs `--input`) should be asserted in tests to avoid accidental interface breaks.
