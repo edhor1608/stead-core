@@ -219,6 +219,7 @@ impl CodexAdapter {
             artifacts: vec![],
             capabilities: Map::new(),
             extensions: Map::new(),
+            lineage: None,
             raw_vendor_payload: json!({ "lines": raw_lines }),
         })
     }

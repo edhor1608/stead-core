@@ -198,3 +198,31 @@
 ### Lessons learned
 - Lossless round-trip behavior requires preserving full raw line objects at import time; partial typed payload capture is insufficient.
 - Array-aware deep merge is required to retain unknown nested fields in vendor content arrays (e.g., Claude `message.content[*]` extras).
+
+## Milestone 8: Lineage-Ready Core (No Rewind Command Yet)
+
+### Problem solved
+- Prepare the canonical core for rewind/fork workflows without adding CLI rewind orchestration yet.
+- Ensure Claude split session files (same `sessionId` across multiple main JSONL files) import as one canonical timeline.
+
+### What was implemented
+- Canonical model now supports optional lineage metadata:
+  - `SessionLineage` added to `SteadSession.lineage`.
+- JSON schema updated with optional `lineage` object fields:
+  - `root_session_uid`, `parent_session_uid`, `fork_origin_event_uid`, `strategy`.
+- Claude adapter import behavior upgraded:
+  - imports all matching main files for a session id (not only newest),
+  - merges raw lines from all split files,
+  - dedupes events by `(stream_id, event_uid)` with latest duplicate winning,
+  - annotates every imported event with `extensions.source_file`,
+  - keeps source file provenance in `source.source_files`.
+- Codex/Claude session constructors updated for new model shape (`lineage: None`).
+
+### Key decisions
+- Keep rewind as a future orchestration feature; do not introduce partial CLI UX before lineage model is stable.
+- Use event-level source file provenance to make split-file imports auditable and to support later rewind/fork tooling.
+- Keep lineage optional to avoid breaking existing canonical payloads and adapters.
+
+### Lessons learned
+- Claude split-history behavior can be represented in canonical form without inventing backend-specific rewind commands in core.
+- Merge-before-sort and identity dedupe is necessary to avoid duplicate events when importing split files.

@@ -2,7 +2,7 @@ use crate::{AdapterError, ExportReport, NativeSessionRef};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -43,7 +43,7 @@ impl ClaudeAdapter {
     }
 
     pub fn import_session(&self, session_id: &str) -> Result<SteadSession, AdapterError> {
-        let mut main_file: Option<(PathBuf, DateTime<Utc>)> = None;
+        let mut main_files: Vec<(PathBuf, DateTime<Utc>)> = Vec::new();
         for file in self.main_session_files() {
             let Ok(summary) = parse_summary(&file) else {
                 continue;
@@ -51,21 +51,32 @@ impl ClaudeAdapter {
             if summary.native_id != session_id {
                 continue;
             }
-            match &main_file {
-                Some((_, best_updated_at)) if *best_updated_at >= summary.updated_at => {}
-                _ => {
-                    main_file = Some((file, summary.updated_at));
-                }
-            }
+            main_files.push((file, summary.updated_at));
         }
 
-        let Some((main_file, _)) = main_file else {
+        if main_files.is_empty() {
             return Err(AdapterError::SessionNotFound(session_id.to_string()));
-        };
+        }
+        main_files.sort_by(|a, b| a.1.cmp(&b.1));
+        let newest_main_file = main_files
+            .last()
+            .map(|(path, _)| path.clone())
+            .expect("main_files cannot be empty");
 
-        let mut session = self.import_from_file(&main_file, "main")?;
-        let mut source_files = vec![main_file.display().to_string()];
-        if let Some(parent) = main_file.parent() {
+        let mut session = self.import_from_file(&main_files[0].0, "main")?;
+        let mut source_files = vec![main_files[0].0.display().to_string()];
+        for (path, _) in main_files.iter().skip(1) {
+            let imported = self.import_from_file(path, "main")?;
+            source_files.push(path.display().to_string());
+            merge_session_metadata(&mut session, &imported);
+            extend_raw_lines(
+                &mut session.raw_vendor_payload,
+                &imported.raw_vendor_payload,
+            );
+            session.events.extend(imported.events);
+        }
+
+        if let Some(parent) = newest_main_file.parent() {
             let sub_dir = parent.join("subagents");
             if sub_dir.exists() {
                 for entry in WalkDir::new(sub_dir).into_iter().flatten() {
@@ -82,13 +93,15 @@ impl ClaudeAdapter {
                     let sub = self.import_from_file(path, &stream_id)?;
                     if sub.source.original_session_id == session_id {
                         source_files.push(path.display().to_string());
+                        extend_raw_lines(&mut session.raw_vendor_payload, &sub.raw_vendor_payload);
                         session.events.extend(sub.events);
                     }
                 }
             }
         }
+        session.events = dedupe_events_by_identity(std::mem::take(&mut session.events));
         canonical_sort_events(&mut session.events);
-        session.source.source_files = source_files;
+        session.source.source_files = dedupe_strings_preserve_order(source_files);
         Ok(session)
     }
 
@@ -106,6 +119,7 @@ impl ClaudeAdapter {
         let mut title: Option<String> = None;
         let mut raw_lines: Vec<Value> = Vec::new();
         let mut events: Vec<SteadEvent> = Vec::new();
+        let source_file = path.as_ref().display().to_string();
 
         for (line_number, line) in reader.lines().enumerate() {
             let line = line?;
@@ -160,7 +174,7 @@ impl ClaudeAdapter {
                                         .last()
                                         .cloned()
                                         .unwrap_or_else(|| json!({})),
-                                    extensions: Map::new(),
+                                    extensions: source_file_extensions(&source_file),
                                 });
                             }
                             Content::Items(items) => {
@@ -203,7 +217,9 @@ impl ClaudeAdapter {
                                                         .last()
                                                         .cloned()
                                                         .unwrap_or_else(|| json!({})),
-                                                    extensions: Map::new(),
+                                                    extensions: source_file_extensions(
+                                                        &source_file,
+                                                    ),
                                                 });
                                             }
                                         }
@@ -225,7 +241,7 @@ impl ClaudeAdapter {
                                                     .last()
                                                     .cloned()
                                                     .unwrap_or_else(|| json!({})),
-                                                extensions: Map::new(),
+                                                extensions: source_file_extensions(&source_file),
                                             });
                                         }
                                         Some("tool_result") => {
@@ -247,7 +263,7 @@ impl ClaudeAdapter {
                                                     .last()
                                                     .cloned()
                                                     .unwrap_or_else(|| json!({})),
-                                                extensions: Map::new(),
+                                                extensions: source_file_extensions(&source_file),
                                             });
                                         }
                                         _ => {}
@@ -281,7 +297,7 @@ impl ClaudeAdapter {
                                         .last()
                                         .cloned()
                                         .unwrap_or_else(|| json!({})),
-                                    extensions: Map::new(),
+                                    extensions: source_file_extensions(&source_file),
                                 });
                             }
                         }
@@ -304,7 +320,7 @@ impl ClaudeAdapter {
                             value: entry.data.unwrap_or_else(|| json!({})),
                         },
                         raw_vendor_payload: raw_lines.last().cloned().unwrap_or_else(|| json!({})),
-                        extensions: Map::new(),
+                        extensions: source_file_extensions(&source_file),
                     });
                 }
                 _ => {}
@@ -338,6 +354,7 @@ impl ClaudeAdapter {
             artifacts: vec![],
             capabilities: Map::new(),
             extensions: Map::new(),
+            lineage: None,
             raw_vendor_payload: json!({ "lines": raw_lines }),
         })
     }
@@ -562,6 +579,67 @@ fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
 fn parse_ts(raw: Option<&str>) -> Option<DateTime<Utc>> {
     raw.and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.with_timezone(&Utc))
+}
+
+fn source_file_extensions(source_file: &str) -> Map<String, Value> {
+    let mut out = Map::new();
+    out.insert(
+        "source_file".to_string(),
+        Value::String(source_file.to_string()),
+    );
+    out
+}
+
+fn dedupe_strings_preserve_order(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for value in values {
+        if seen.insert(value.clone()) {
+            out.push(value);
+        }
+    }
+    out
+}
+
+fn dedupe_events_by_identity(events: Vec<SteadEvent>) -> Vec<SteadEvent> {
+    let mut index_by_key: HashMap<String, usize> = HashMap::new();
+    let mut out = Vec::new();
+    for event in events {
+        let key = format!("{}::{}", event.stream_id, event.event_uid);
+        if let Some(index) = index_by_key.get(&key).copied() {
+            out[index] = event;
+        } else {
+            index_by_key.insert(key, out.len());
+            out.push(event);
+        }
+    }
+    out
+}
+
+fn merge_session_metadata(base: &mut SteadSession, extra: &SteadSession) {
+    if extra.metadata.created_at < base.metadata.created_at {
+        base.metadata.created_at = extra.metadata.created_at;
+    }
+    if extra.metadata.updated_at > base.metadata.updated_at {
+        base.metadata.updated_at = extra.metadata.updated_at;
+    }
+    if base.metadata.title.is_none() {
+        base.metadata.title = extra.metadata.title.clone();
+    }
+    if base.metadata.project_root == "/unknown" && extra.metadata.project_root != "/unknown" {
+        base.metadata.project_root = extra.metadata.project_root.clone();
+    }
+}
+
+fn extend_raw_lines(base: &mut Value, extra: &Value) {
+    let Some(extra_lines) = extra.get("lines").and_then(|v| v.as_array()) else {
+        return;
+    };
+    if let Some(base_lines) = base.get_mut("lines").and_then(|v| v.as_array_mut()) {
+        base_lines.extend(extra_lines.iter().cloned());
+        return;
+    }
+    *base = json!({ "lines": extra_lines });
 }
 
 fn value_to_text(value: Option<Value>) -> Option<String> {

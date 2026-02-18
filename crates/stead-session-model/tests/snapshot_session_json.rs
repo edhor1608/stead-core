@@ -53,6 +53,7 @@ fn canonical_json_snapshot_is_stable() {
         artifacts: vec![],
         capabilities: serde_json::Map::new(),
         extensions: serde_json::Map::new(),
+        lineage: None,
         raw_vendor_payload: serde_json::json!({ "session_meta": { "id": "abc" } }),
     };
 
