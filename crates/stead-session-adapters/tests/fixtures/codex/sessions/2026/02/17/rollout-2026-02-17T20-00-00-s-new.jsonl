@@ -1,4 +1,4 @@
-{"timestamp":"2026-02-17T20:00:00Z","type":"session_meta","payload":{"id":"s-new","cwd":"/Users/jonas/repos/stead-core","model_provider":"openai","git":{"branch":"rewrite/v1","commit_hash":"def456","repository_url":"https://github.com/edhor1608/stead-core.git"}}}
+{"timestamp":"2026-02-17T20:00:00Z","type":"session_meta","payload":{"id":"s-new","cwd":"/path/to/repo","model_provider":"openai","git":{"branch":"rewrite/v1","commit_hash":"def456","repository_url":"https://github.com/example/stead-core.git"}}}
 {"timestamp":"2026-02-17T20:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Import this codex session"}]}}
 {"timestamp":"2026-02-17T20:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will inspect the repo first."}]}}
 {"timestamp":"2026-02-17T20:00:03Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call_1","arguments":"{\"cmd\":\"ls -la\"}"}}

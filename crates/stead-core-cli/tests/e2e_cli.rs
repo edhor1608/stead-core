@@ -1,5 +1,6 @@
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
+use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
@@ -48,6 +49,18 @@ fn list_canonical_sessions(repo_root: &Path) -> Vec<serde_json::Value> {
     out
 }
 
+fn parse_jsonl_lines(raw: &str) -> Vec<Value> {
+    raw.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect()
+}
+
+fn assert_jsonl_has_type(lines: &[Value], expected_type: &str) {
+    assert!(lines.iter().any(|line| {
+        line.get("type") == Some(&Value::String(expected_type.to_string()))
+    }));
+}
 #[test]
 fn list_sessions_from_codex_backend_as_json() {
     let temp = TempDir::new().unwrap();
@@ -135,7 +148,8 @@ fn convert_codex_to_claude_is_e2e_runnable() {
 
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"assistant\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "assistant");
 }
 
 #[test]
@@ -174,7 +188,8 @@ fn convert_claude_to_codex_is_e2e_runnable() {
 
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"session_meta\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "session_meta");
 }
 
 #[test]
@@ -223,7 +238,8 @@ fn export_canonical_to_codex_is_e2e_runnable() {
         .success();
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"response_item\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "response_item");
 }
 
 #[test]
@@ -272,7 +288,8 @@ fn export_canonical_to_claude_is_e2e_runnable() {
         .success();
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"assistant\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "assistant");
 }
 
 #[test]
@@ -359,8 +376,8 @@ fn sync_scopes_to_repo_when_matching_sessions_exist() {
     let codex_old = codex_home
         .path()
         .join("sessions/2026/02/16/rollout-2026-02-16T20-00-00-s-old.jsonl");
-    rewrite_in_file(&codex_new, "/Users/jonas/repos/stead-core", repo_path);
-    rewrite_in_file(&codex_old, "/Users/jonas/repos/stead-core", "/tmp/other-repo");
+    rewrite_in_file(&codex_new, "/path/to/repo", repo_path);
+    rewrite_in_file(&codex_old, "/path/to/repo", "/tmp/other-repo");
 
     let claude_main = claude_home
         .path()
@@ -368,8 +385,8 @@ fn sync_scopes_to_repo_when_matching_sessions_exist() {
     let claude_sub = claude_home
         .path()
         .join("projects/-Users-jonas-repos-stead-core/subagents/agent-a123.jsonl");
-    rewrite_in_file(&claude_main, "/Users/jonas/repos/stead-core", repo_path);
-    rewrite_in_file(&claude_sub, "/Users/jonas/repos/stead-core", repo_path);
+    rewrite_in_file(&claude_main, "/path/to/repo", repo_path);
+    rewrite_in_file(&claude_sub, "/path/to/repo", repo_path);
 
     stead_core()
         .args([
@@ -467,6 +484,7 @@ fn materialize_updates_canonical_native_refs_and_writes_target_session() {
 }
 
 #[test]
+#[cfg(unix)]
 fn resume_uses_backend_resume_flag_with_prompt() {
     let repo = TempDir::new().unwrap();
     let codex_home = TempDir::new().unwrap();
@@ -513,12 +531,9 @@ fn resume_uses_backend_resume_flag_with_prompt() {
     )
     .unwrap();
     let mut perms = std::fs::metadata(&runner_script).unwrap().permissions();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&runner_script, perms).unwrap();
-    }
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&runner_script, perms).unwrap();
 
     stead_core()
         .env("STEAD_CORE_RUNNER", runner_script.to_str().unwrap())

@@ -63,7 +63,7 @@ impl CodexAdapter {
                 continue;
             }
             let envelope: CodexEnvelope = serde_json::from_str(&line)?;
-            raw_lines.push(serde_json::from_str(&line)?);
+            raw_lines.push(serde_json::to_value(&envelope)?);
 
             let ts = parse_ts(envelope.timestamp.as_deref()).unwrap_or_else(Utc::now);
             if created.is_none() || created.is_some_and(|v| ts < v) {
@@ -91,7 +91,9 @@ impl CodexAdapter {
                         match item_type {
                             "message" => {
                                 let role = payload.role.as_deref().unwrap_or_default();
-                                for text in extract_message_texts(&payload.content) {
+                                for (text_index, text) in
+                                    extract_message_texts(&payload.content).into_iter().enumerate()
+                                {
                                     if role == "user" && first_user_text.is_none() {
                                         first_user_text = Some(text.clone());
                                     }
@@ -101,7 +103,7 @@ impl CodexAdapter {
                                         EventKind::MessageUser
                                     };
                                     events.push(SteadEvent {
-                                        event_uid: format!("event-{}", line_number),
+                                        event_uid: format!("event-{}-{}", line_number, text_index),
                                         stream_id: "main".to_string(),
                                         line_number: line_number as u64,
                                         sequence: None,
@@ -367,6 +369,9 @@ fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
 
     for line in reader.lines() {
         let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
         let envelope: CodexEnvelope = serde_json::from_str(&line)?;
         let ts = parse_ts(envelope.timestamp.as_deref()).unwrap_or_else(Utc::now);
         if updated.is_none() || updated.is_some_and(|v| ts > v) {

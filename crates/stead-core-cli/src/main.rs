@@ -1,11 +1,11 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::json;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+use twox_hash::XxHash64;
 
 use stead_session_adapters::claude::ClaudeAdapter;
 use stead_session_adapters::codex::CodexAdapter;
@@ -182,7 +182,14 @@ fn run_list(backend: Backend, base_dir: PathBuf, json: bool) -> Result<()> {
         Backend::Claude => ClaudeAdapter::from_base_dir(base_dir).list_sessions()?,
     };
     if json {
-        println!("{}", serde_json::to_string(&sessions)?);
+        let serialized = serde_json::to_string(&sessions).with_context(|| {
+            format!(
+                "failed to serialize sessions to JSON for backend {:?} ({} sessions)",
+                backend,
+                sessions.len()
+            )
+        })?;
+        println!("{serialized}");
     } else {
         for session in sessions {
             println!("{} {}", session.native_id, session.file_path.display());
@@ -198,6 +205,13 @@ fn run_import(from: Backend, base_dir: PathBuf, session: &str, out: PathBuf) -> 
     };
     let serialized =
         serde_json::to_string_pretty(&imported).context("failed to serialize canonical session")?;
+    let parent = out
+        .parent()
+        .with_context(|| format!("invalid output path: {}", out.display()))?;
+    if !parent.as_os_str().is_empty() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create output directory {}", parent.display()))?;
+    }
     std::fs::write(&out, serialized)
         .with_context(|| format!("failed to write canonical session to {}", out.display()))?;
     Ok(())
@@ -208,6 +222,13 @@ fn run_export(to: Backend, base_dir: PathBuf, input: PathBuf, out: PathBuf) -> R
         .with_context(|| format!("failed to read canonical input {}", input.display()))?;
     let session: SteadSession = serde_json::from_str(&raw)
         .with_context(|| format!("invalid canonical JSON in {}", input.display()))?;
+    let parent = out
+        .parent()
+        .with_context(|| format!("invalid output path: {}", out.display()))?;
+    if !parent.as_os_str().is_empty() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create output directory {}", parent.display()))?;
+    }
     match to {
         Backend::Codex => {
             CodexAdapter::from_base_dir(base_dir).export_session(&session, &out)?;
@@ -231,6 +252,13 @@ fn run_convert(
         Backend::Codex => CodexAdapter::from_base_dir(source_base).import_session(session)?,
         Backend::Claude => ClaudeAdapter::from_base_dir(source_base).import_session(session)?,
     };
+    let parent = out
+        .parent()
+        .with_context(|| format!("invalid output path: {}", out.display()))?;
+    if !parent.as_os_str().is_empty() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create output directory {}", parent.display()))?;
+    }
     match to {
         Backend::Codex => {
             CodexAdapter::from_base_dir(target_base).export_session(&imported, &out)?;
@@ -405,10 +433,15 @@ fn canonical_store_dir(repo: &Path) -> PathBuf {
 }
 
 fn canonical_session_path(repo: &Path, session_uid: &str) -> PathBuf {
-    let file_name: String = session_uid
+    let sanitized: String = session_uid
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
         .collect();
+    let file_name = if sanitized.is_empty() {
+        format!("session-{}", short_hash(session_uid))
+    } else {
+        format!("{}-{}", sanitized, short_hash(session_uid))
+    };
     canonical_store_dir(repo).join(format!("{}.json", file_name))
 }
 
@@ -493,9 +526,9 @@ fn source_backend_matches(source_backend: BackendKind, backend: Backend) -> bool
 }
 
 fn short_hash(value: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    value.hash(&mut hasher);
-    format!("{:x}", hasher.finish())[..8].to_string()
+    let mut hasher = XxHash64::with_seed(0);
+    hasher.write(value.as_bytes());
+    format!("{:016x}", hasher.finish())[..8].to_string()
 }
 
 fn default_materialized_path(base_dir: &Path, repo: &Path, backend: Backend, native_id: &str) -> PathBuf {
@@ -511,7 +544,7 @@ fn default_materialized_path(base_dir: &Path, repo: &Path, backend: Backend, nat
             .join("auto")
             .join(format!("rollout-{}-{}.jsonl", unix_secs, native_id)),
         Backend::Claude => {
-            let slug = repo.display().to_string().replace('/', "-");
+            let slug = repo.display().to_string().replace(['/', '\\'], "-");
             base_dir.join("projects").join(slug).join(format!("{}.jsonl", native_id))
         }
     }

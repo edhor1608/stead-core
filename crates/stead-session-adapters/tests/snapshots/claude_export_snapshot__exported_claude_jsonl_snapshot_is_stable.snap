@@ -3,10 +3,10 @@ source: crates/stead-session-adapters/tests/claude_export_snapshot.rs
 assertion_line: 35
 expression: exported
 ---
-{"cwd":"/Users/jonas/repos/stead-core","message":{"content":"Please inspect this repo","role":"user"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:00+00:00","type":"user","uuid":"u1-0"}
-{"cwd":"/Users/jonas/repos/stead-core","message":{"content":[{"text":"I will inspect it now.","type":"text"}],"role":"assistant"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:01+00:00","type":"assistant","uuid":"a1-1"}
-{"cwd":"/Users/jonas/repos/stead-core","message":{"content":[{"id":"toolu_1","input":{"file_path":"README.md"},"name":"Read","type":"tool_use"}],"role":"assistant"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:01+00:00","type":"assistant","uuid":"toolu_1"}
-{"cwd":"/Users/jonas/repos/stead-core","message":{"content":"Subagent task details","role":"user"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:01+00:00","type":"user","uuid":"su1-0"}
-{"cwd":"/Users/jonas/repos/stead-core","message":{"content":[{"content":"# README","is_error":false,"tool_use_id":"toolu_1","type":"tool_result"}],"role":"user"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:02+00:00","type":"user","uuid":"u2-2"}
-{"cwd":"/Users/jonas/repos/stead-core","message":{"content":[{"text":"Subagent done.","type":"text"}],"role":"assistant"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:02+00:00","type":"assistant","uuid":"sa1-1"}
-{"cwd":"/Users/jonas/repos/stead-core","data":{"message":"post-tool","type":"hook"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:03+00:00","type":"progress","uuid":"progress-3"}
+{"cwd":"/path/to/repo","message":{"content":"Please inspect this repo","role":"user"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:00+00:00","type":"user","uuid":"u1-0"}
+{"cwd":"/path/to/repo","message":{"content":[{"text":"I will inspect it now.","type":"text"}],"role":"assistant"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:01+00:00","type":"assistant","uuid":"a1-1-item-0"}
+{"cwd":"/path/to/repo","message":{"content":[{"id":"toolu_1","input":{"file_path":"README.md"},"name":"Read","type":"tool_use"}],"role":"assistant"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:01+00:00","type":"assistant","uuid":"toolu_1"}
+{"cwd":"/path/to/repo","message":{"content":"Subagent task details","role":"user"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:01+00:00","type":"user","uuid":"su1-0"}
+{"cwd":"/path/to/repo","message":{"content":[{"content":"# README","is_error":false,"tool_use_id":"toolu_1","type":"tool_result"}],"role":"user"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:02+00:00","type":"user","uuid":"u2-2-toolu_1-result"}
+{"cwd":"/path/to/repo","message":{"content":[{"text":"Subagent done.","type":"text"}],"role":"assistant"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:02+00:00","type":"assistant","uuid":"sa1-1-item-0"}
+{"cwd":"/path/to/repo","data":{"message":"post-tool","type":"hook"},"sessionId":"claude-main","timestamp":"2026-02-17T21:00:03+00:00","type":"progress","uuid":"p1"}
