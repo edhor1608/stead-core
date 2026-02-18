@@ -1,11 +1,11 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::json;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+use twox_hash::XxHash64;
 
 use stead_session_adapters::claude::ClaudeAdapter;
 use stead_session_adapters::codex::CodexAdapter;
@@ -490,9 +490,9 @@ fn source_backend_matches(source_backend: BackendKind, backend: Backend) -> bool
 }
 
 fn short_hash(value: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    value.hash(&mut hasher);
-    format!("{:x}", hasher.finish())[..8].to_string()
+    let mut hasher = XxHash64::with_seed(0);
+    hasher.write(value.as_bytes());
+    format!("{:016x}", hasher.finish())[..8].to_string()
 }
 
 fn default_materialized_path(base_dir: &Path, repo: &Path, backend: Backend, native_id: &str) -> PathBuf {

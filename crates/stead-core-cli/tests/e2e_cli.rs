@@ -372,6 +372,7 @@ fn materialize_updates_canonical_native_refs_and_writes_target_session() {
 }
 
 #[test]
+#[cfg(unix)]
 fn resume_uses_backend_resume_flag_with_prompt() {
     let repo = TempDir::new().unwrap();
     let codex_home = TempDir::new().unwrap();
