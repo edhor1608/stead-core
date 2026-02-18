@@ -164,6 +164,15 @@ impl ClaudeAdapter {
                                         .clone()
                                         .or(item.tool_use_id.clone())
                                         .unwrap_or_else(|| format!("item-{}", item_index));
+                                    let event_uid = format!(
+                                        "{}-{}-{}",
+                                        event_uuid, line_number, item_discriminator
+                                    );
+                                    let call_id = item
+                                        .id
+                                        .clone()
+                                        .or(item.tool_use_id.clone())
+                                        .unwrap_or_else(|| event_uid.clone());
                                     match item.item_type.as_deref() {
                                         Some("text") => {
                                             if let Some(text) = item.text {
@@ -176,10 +185,7 @@ impl ClaudeAdapter {
                                                     EventKind::MessageUser
                                                 };
                                                 events.push(SteadEvent {
-                                                    event_uid: format!(
-                                                        "{}-{}-{}",
-                                                        event_uuid, line_number, item_discriminator
-                                                    ),
+                                                    event_uid: event_uid.clone(),
                                                     stream_id: stream_id.to_string(),
                                                     line_number: line_number as u64,
                                                     sequence: None,
@@ -197,10 +203,7 @@ impl ClaudeAdapter {
                                         }
                                         Some("tool_use") => {
                                             events.push(SteadEvent {
-                                                event_uid: format!(
-                                                    "{}-{}-{}",
-                                                    event_uuid, line_number, item_discriminator
-                                                ),
+                                                event_uid: call_id.clone(),
                                                 stream_id: stream_id.to_string(),
                                                 line_number: line_number as u64,
                                                 sequence: None,
@@ -220,10 +223,7 @@ impl ClaudeAdapter {
                                         }
                                         Some("tool_result") => {
                                             events.push(SteadEvent {
-                                                event_uid: format!(
-                                                    "{}-{}-{}",
-                                                    event_uuid, line_number, item_discriminator
-                                                ),
+                                                event_uid: format!("{}-result", event_uid),
                                                 stream_id: stream_id.to_string(),
                                                 line_number: line_number as u64,
                                                 sequence: None,
@@ -231,7 +231,7 @@ impl ClaudeAdapter {
                                                 kind: EventKind::ToolResult,
                                                 actor: None,
                                                 payload: EventPayload::ToolResult {
-                                                    call_id: item.tool_use_id.unwrap_or_default(),
+                                                    call_id,
                                                     ok: !item.is_error.unwrap_or(false),
                                                     output_text: item.content,
                                                     error_text: None,
@@ -251,8 +251,12 @@ impl ClaudeAdapter {
                     }
                 }
                 Some("progress") => {
+                    let progress_uid = entry
+                        .uuid
+                        .clone()
+                        .unwrap_or_else(|| format!("progress-{}-{}", stream_id, line_number));
                     events.push(SteadEvent {
-                        event_uid: format!("progress-{}", line_number),
+                        event_uid: progress_uid,
                         stream_id: stream_id.to_string(),
                         line_number: line_number as u64,
                         sequence: None,
