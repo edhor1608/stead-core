@@ -1,5 +1,6 @@
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
+use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
@@ -24,6 +25,19 @@ fn copy_tree(from: &Path, to: &Path) {
         }
         std::fs::copy(path, target).unwrap();
     }
+}
+
+fn parse_jsonl_lines(raw: &str) -> Vec<Value> {
+    raw.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect()
+}
+
+fn assert_jsonl_has_type(lines: &[Value], expected_type: &str) {
+    assert!(lines.iter().any(|line| {
+        line.get("type") == Some(&Value::String(expected_type.to_string()))
+    }));
 }
 
 #[test]
@@ -113,7 +127,8 @@ fn convert_codex_to_claude_is_e2e_runnable() {
 
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"assistant\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "assistant");
 }
 
 #[test]
@@ -152,7 +167,8 @@ fn convert_claude_to_codex_is_e2e_runnable() {
 
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"session_meta\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "session_meta");
 }
 
 #[test]
@@ -201,7 +217,8 @@ fn export_canonical_to_codex_is_e2e_runnable() {
         .success();
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"response_item\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "response_item");
 }
 
 #[test]
@@ -250,5 +267,6 @@ fn export_canonical_to_claude_is_e2e_runnable() {
         .success();
     assert!(out.exists());
     let exported = std::fs::read_to_string(out).unwrap();
-    assert!(exported.contains("\"type\":\"assistant\""));
+    let lines = parse_jsonl_lines(&exported);
+    assert_jsonl_has_type(&lines, "assistant");
 }
