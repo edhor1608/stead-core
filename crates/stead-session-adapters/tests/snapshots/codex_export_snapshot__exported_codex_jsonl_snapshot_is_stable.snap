@@ -1,0 +1,11 @@
+---
+source: crates/stead-session-adapters/tests/codex_export_snapshot.rs
+assertion_line: 21
+expression: exported
+---
+{"payload":{"cwd":"/path/to/repo","id":"s-new","model_provider":"unknown"},"timestamp":"2026-02-17T20:00:00+00:00","type":"session_meta"}
+{"payload":{"content":[{"text":"Import this codex session","type":"input_text"}],"role":"user","type":"message"},"timestamp":"2026-02-17T20:00:01+00:00","type":"response_item"}
+{"payload":{"content":[{"text":"I will inspect the repo first.","type":"output_text"}],"role":"assistant","type":"message"},"timestamp":"2026-02-17T20:00:02+00:00","type":"response_item"}
+{"payload":{"arguments":"{\"cmd\":\"ls -la\"}","call_id":"call_1","name":"exec_command","type":"function_call"},"timestamp":"2026-02-17T20:00:03+00:00","type":"response_item"}
+{"payload":{"call_id":"call_1","output":"total 42\\nREADME.md","type":"function_call_output"},"timestamp":"2026-02-17T20:00:04+00:00","type":"response_item"}
+{"payload":{"info":{"total_token_usage":{"input_tokens":101,"output_tokens":38}},"type":"token_count"},"timestamp":"2026-02-17T20:00:05+00:00","type":"event_msg"}

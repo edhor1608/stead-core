@@ -24,3 +24,29 @@
 ### Lessons learned
 - Snapshot tests require fixed timestamps; dynamic `now()` values create flaky snapshots.
 - Store sequence as an explicit event field and validate contiguity in the model itself.
+
+## Milestone 2: Codex Adapter (Import/Export/Round-Trip)
+
+### Problem solved
+- Parse real Codex-style JSONL streams into canonical sessions.
+- Export canonical sessions back into Codex JSONL shape.
+- Prove loss-minimizing round-trip for core semantics.
+
+### What was implemented
+- `CodexAdapter` with:
+  - recursive session discovery under `sessions/**/*.jsonl`,
+  - session summary listing sorted by recency,
+  - import by native id and import by file path,
+  - canonical export with stable JSONL envelopes.
+- Codex-focused fixture corpus and test suite:
+  - discovery/integration tests,
+  - round-trip contract test,
+  - export snapshot test.
+
+### Key decisions
+- Preserve full input lines in `raw_vendor_payload.lines` for loss-aware debugging.
+- Map `event_msg.token_count` into canonical `system_progress` events.
+- Emit explicit `token_count` envelopes on export so imported event counts stay stable.
+
+### Lessons learned
+- Round-trip tests uncovered real lossiness early (progress events); snapshot-only tests would not.
