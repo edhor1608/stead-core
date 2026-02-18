@@ -361,6 +361,9 @@ fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
 
     for line in reader.lines() {
         let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
         let envelope: CodexEnvelope = serde_json::from_str(&line)?;
         let ts = parse_ts(envelope.timestamp.as_deref()).unwrap_or_else(Utc::now);
         if updated.is_none() || updated.is_some_and(|v| ts > v) {
