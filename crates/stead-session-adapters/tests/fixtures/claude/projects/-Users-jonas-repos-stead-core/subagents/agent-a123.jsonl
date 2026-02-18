@@ -1,0 +1,2 @@
+{"type":"user","timestamp":"2026-02-17T21:00:01Z","sessionId":"claude-main","cwd":"/Users/jonas/repos/stead-core","gitBranch":"main","userType":"agent","uuid":"su1","message":{"role":"user","content":"Subagent task details"}}
+{"type":"assistant","timestamp":"2026-02-17T21:00:02Z","sessionId":"claude-main","cwd":"/Users/jonas/repos/stead-core","gitBranch":"main","userType":"agent","uuid":"sa1","message":{"role":"assistant","model":"claude-opus-4-6","content":[{"type":"text","text":"Subagent done."}]}}
