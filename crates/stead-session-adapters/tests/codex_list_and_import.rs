@@ -1,5 +1,5 @@
-use stead_session_adapters::codex::CodexAdapter;
 use stead_session_adapters::AdapterError;
+use stead_session_adapters::codex::CodexAdapter;
 use tempfile::TempDir;
 
 mod support;

@@ -1,5 +1,5 @@
-use stead_session_adapters::claude::ClaudeAdapter;
 use stead_session_adapters::AdapterError;
+use stead_session_adapters::claude::ClaudeAdapter;
 use stead_session_model::EventKind;
 use tempfile::TempDir;
 
@@ -23,16 +23,20 @@ fn import_session_merges_main_and_subagent_streams() {
     common::copy_claude_fixture_tree(&temp);
 
     let adapter = ClaudeAdapter::from_base_dir(temp.path());
-    let session = adapter.import_session("claude-main").expect("import session");
+    let session = adapter
+        .import_session("claude-main")
+        .expect("import session");
 
     assert_eq!(session.source.original_session_id, "claude-main");
     assert_eq!(session.metadata.project_root, "/path/to/repo");
     assert_eq!(session.events.len(), 7);
     assert!(session.events.iter().any(|e| e.stream_id == "main"));
-    assert!(session
-        .events
-        .iter()
-        .any(|e| e.stream_id.starts_with("subagent:agent-a123")));
+    assert!(
+        session
+            .events
+            .iter()
+            .any(|e| e.stream_id.starts_with("subagent:agent-a123"))
+    );
 }
 
 #[test]
@@ -108,8 +112,15 @@ fn import_session_parses_non_string_tool_result_content() {
     .unwrap();
 
     let adapter = ClaudeAdapter::from_base_dir(temp.path());
-    let session = adapter.import_session("raw-content").expect("import session");
+    let session = adapter
+        .import_session("raw-content")
+        .expect("import session");
 
     assert!(session.events.iter().any(|e| e.kind == EventKind::ToolCall));
-    assert!(session.events.iter().any(|e| e.kind == EventKind::ToolResult));
+    assert!(
+        session
+            .events
+            .iter()
+            .any(|e| e.kind == EventKind::ToolResult)
+    );
 }
