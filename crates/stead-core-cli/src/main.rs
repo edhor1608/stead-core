@@ -1,11 +1,13 @@
 use anyhow::{Context, Result, anyhow, bail};
+use chrono::{Datelike, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
-use serde_json::json;
+use serde_json::{Value, json};
+use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 use twox_hash::XxHash64;
+use uuid::Uuid;
 
 use stead_session_adapters::NativeSessionRef;
 use stead_session_adapters::claude::ClaudeAdapter;
@@ -134,6 +136,11 @@ enum SessionCommands {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(Debug, Clone)]
+struct StoredCanonical {
+    session: SteadSession,
 }
 
 fn main() -> Result<()> {
@@ -302,44 +309,46 @@ fn run_sync(
     json_out: bool,
 ) -> Result<()> {
     std::fs::create_dir_all(canonical_store_dir(&repo))?;
-
+    let mut stored = load_all_canonical_sessions(&repo)?;
     let mut imported = Vec::new();
 
     let codex = CodexAdapter::from_base_dir(codex_base);
     let codex_sessions = codex.list_sessions()?;
     for native in scope_sessions_to_repo(&repo, codex_sessions) {
-        let mut session = codex.import_from_file(&native.file_path)?;
-        set_native_ref(
-            &mut session,
+        let session = codex.import_from_file(&native.file_path)?;
+        let (canonical_uid, stored_path) = upsert_synced_session(
+            &repo,
+            &mut stored,
+            session,
             Backend::Codex,
             &native.native_id,
             &native.file_path,
-        );
-        let stored = store_canonical_session(&repo, &session)?;
+        )?;
         imported.push(json!({
             "backend": "codex",
             "native_id": native.native_id,
-            "session_uid": session.session_uid,
-            "stored_at": stored
+            "session_uid": canonical_uid,
+            "stored_at": stored_path
         }));
     }
 
     let claude = ClaudeAdapter::from_base_dir(claude_base);
     let claude_sessions = claude.list_sessions()?;
     for native in scope_sessions_to_repo(&repo, claude_sessions) {
-        let mut session = claude.import_session(&native.native_id)?;
-        set_native_ref(
-            &mut session,
+        let session = claude.import_session(&native.native_id)?;
+        let (canonical_uid, stored_path) = upsert_synced_session(
+            &repo,
+            &mut stored,
+            session,
             Backend::Claude,
             &native.native_id,
             &native.file_path,
-        );
-        let stored = store_canonical_session(&repo, &session)?;
+        )?;
         imported.push(json!({
             "backend": "claude",
             "native_id": native.native_id,
-            "session_uid": session.session_uid,
-            "stored_at": stored
+            "session_uid": canonical_uid,
+            "stored_at": stored_path
         }));
     }
 
@@ -364,11 +373,15 @@ fn run_materialize(
     json_out: bool,
 ) -> Result<()> {
     let mut session = load_canonical_session(&repo, session_uid)?;
+    ensure_shared_session_uid(&mut session);
     let native_id = choose_native_id(&session, to);
     let output_path =
         out.unwrap_or_else(|| default_materialized_path(&base_dir, &repo, to, &native_id));
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent)?;
+    }
+    if matches!(to, Backend::Codex) {
+        prune_codex_rollouts_for_native_id(&base_dir, &native_id, &output_path)?;
     }
 
     let mut export_session = session.clone();
@@ -383,6 +396,7 @@ fn run_materialize(
         };
 
     set_native_ref(&mut session, to, &native_id, &output_path);
+    ensure_shared_session_uid(&mut session);
     store_canonical_session(&repo, &session)?;
 
     if json_out {
@@ -412,6 +426,7 @@ fn run_resume(
     json_out: bool,
 ) -> Result<()> {
     let mut session = load_canonical_session(&repo, session_uid)?;
+    let mut changed = ensure_shared_session_uid(&mut session);
 
     let (native_id, native_path) = if let Some(found) = get_native_ref(&session, backend) {
         found
@@ -428,6 +443,9 @@ fn run_resume(
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        if matches!(backend, Backend::Codex) {
+            prune_codex_rollouts_for_native_id(&base_dir, &native_id, &output_path)?;
+        }
 
         let mut export_session = session.clone();
         export_session.source.original_session_id = native_id.clone();
@@ -442,7 +460,7 @@ fn run_resume(
             }
         }
         set_native_ref(&mut session, backend, &native_id, &output_path);
-        store_canonical_session(&repo, &session)?;
+        changed = true;
         (native_id, output_path)
     };
 
@@ -459,9 +477,17 @@ fn run_resume(
                 std::env::var("STEAD_CORE_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_string())
             }
         };
-        Command::new(bin)
-            .args(["--resume", &native_id, prompt])
-            .status()?
+        let mut command = Command::new(bin);
+        command.current_dir(&repo);
+        match backend {
+            Backend::Codex => {
+                command.args(["exec", "resume", &native_id, prompt]);
+            }
+            Backend::Claude => {
+                command.args(["-p", "-r", &native_id, prompt]);
+            }
+        }
+        command.status()?
     };
 
     if !status.success() {
@@ -481,6 +507,10 @@ fn run_resume(
         );
     } else {
         println!("resumed {} on {}", session_uid, backend_key(backend));
+    }
+
+    if changed {
+        store_canonical_session(&repo, &session)?;
     }
 
     Ok(())
@@ -504,6 +534,158 @@ fn run_handoff(
         out,
         json_out,
     )
+}
+
+fn upsert_synced_session(
+    repo: &Path,
+    stored: &mut Vec<StoredCanonical>,
+    mut imported: SteadSession,
+    backend: Backend,
+    native_id: &str,
+    native_path: &Path,
+) -> Result<(String, PathBuf)> {
+    ensure_shared_session_uid(&mut imported);
+    set_native_ref(&mut imported, backend, native_id, native_path);
+
+    let target_index = stored.iter().position(|existing| {
+        existing
+            .session
+            .extensions
+            .get("native_refs")
+            .and_then(|v| v.as_object())
+            .and_then(|refs| refs.get(backend_key(backend)))
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("session_id"))
+            .and_then(|v| v.as_str())
+            .is_some_and(|id| id == native_id)
+    });
+
+    let target_index = target_index.or_else(|| {
+        stored
+            .iter()
+            .position(|existing| existing.session.session_uid == imported.session_uid)
+    });
+
+    let target_index = target_index.or_else(|| {
+        let imported_shared = imported
+            .shared_session_uid
+            .clone()
+            .unwrap_or_else(|| imported.session_uid.clone());
+        stored.iter().position(|existing| {
+            existing
+                .session
+                .shared_session_uid
+                .as_deref()
+                .unwrap_or(existing.session.session_uid.as_str())
+                == imported_shared
+        })
+    });
+
+    let target_index = target_index.or_else(|| {
+        stored.iter().position(|existing| {
+            session_uid_aliases(&existing.session)
+                .iter()
+                .any(|alias| alias == &imported.session_uid)
+        })
+    });
+
+    if let Some(index) = target_index {
+        let mut merged = merge_sessions(stored[index].session.clone(), imported);
+        set_native_ref(&mut merged, backend, native_id, native_path);
+        ensure_shared_session_uid(&mut merged);
+        let stored_path = store_canonical_session(repo, &merged)?;
+        stored[index] = StoredCanonical {
+            session: merged.clone(),
+        };
+        return Ok((merged.session_uid, stored_path));
+    }
+
+    let stored_path = store_canonical_session(repo, &imported)?;
+    stored.push(StoredCanonical {
+        session: imported.clone(),
+    });
+    Ok((imported.session_uid, stored_path))
+}
+
+fn merge_sessions(mut anchor: SteadSession, incoming: SteadSession) -> SteadSession {
+    let anchor_shared = anchor
+        .shared_session_uid
+        .clone()
+        .unwrap_or_else(|| anchor.session_uid.clone());
+    anchor.shared_session_uid = Some(anchor_shared);
+
+    if incoming.session_uid != anchor.session_uid {
+        add_session_uid_alias(&mut anchor, &incoming.session_uid);
+    }
+    for alias in session_uid_aliases(&incoming) {
+        add_session_uid_alias(&mut anchor, &alias);
+    }
+    if let Some(shared) = incoming.shared_session_uid.as_ref()
+        && shared != &anchor.session_uid
+    {
+        add_session_uid_alias(&mut anchor, shared);
+    }
+
+    if incoming.metadata.created_at < anchor.metadata.created_at {
+        anchor.metadata.created_at = incoming.metadata.created_at;
+    }
+    if incoming.metadata.updated_at > anchor.metadata.updated_at {
+        anchor.metadata.updated_at = incoming.metadata.updated_at;
+    }
+    if anchor.metadata.title.is_none() {
+        anchor.metadata.title = incoming.metadata.title.clone();
+    }
+    if anchor.metadata.project_root == "/unknown" && incoming.metadata.project_root != "/unknown" {
+        anchor.metadata.project_root = incoming.metadata.project_root.clone();
+    }
+
+    let mut source_files: Vec<String> = anchor
+        .source
+        .source_files
+        .iter()
+        .chain(incoming.source.source_files.iter())
+        .cloned()
+        .collect();
+    source_files = dedupe_strings(source_files);
+    anchor.source.source_files = source_files;
+    upsert_backend_raw_lines(&mut anchor.raw_vendor_payload, &incoming);
+
+    let mut index_by_key: HashMap<String, usize> = HashMap::new();
+    let mut merged_events = Vec::new();
+    for event in anchor.events.into_iter().chain(incoming.events.into_iter()) {
+        let key = format!(
+            "{}|{}|{}|{:?}",
+            event.stream_id, event.event_uid, event.timestamp, event.kind
+        );
+        if let Some(index) = index_by_key.get(&key).copied() {
+            merged_events[index] = event;
+        } else {
+            index_by_key.insert(key, merged_events.len());
+            merged_events.push(event);
+        }
+    }
+    stead_session_model::canonical_sort_events(&mut merged_events);
+    anchor.events = merged_events;
+    anchor
+}
+
+fn load_all_canonical_sessions(repo: &Path) -> Result<Vec<StoredCanonical>> {
+    let store = canonical_store_dir(repo);
+    if !store.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&store)? {
+        let path = entry?.path();
+        if !path.is_file() {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&path)?;
+        let mut session: SteadSession = serde_json::from_str(&raw)?;
+        ensure_shared_session_uid(&mut session);
+        out.push(StoredCanonical { session });
+    }
+    Ok(out)
 }
 
 fn canonical_store_dir(repo: &Path) -> PathBuf {
@@ -559,11 +741,104 @@ fn load_canonical_session(repo: &Path, session_uid: &str) -> Result<SteadSession
         }
         let raw = std::fs::read_to_string(&path)?;
         let session: SteadSession = serde_json::from_str(&raw)?;
-        if session.session_uid == session_uid {
+        if canonical_lookup_matches(&session, session_uid) {
             return Ok(session);
         }
     }
     Err(anyhow!("canonical session not found: {}", session_uid))
+}
+
+fn canonical_lookup_matches(session: &SteadSession, lookup: &str) -> bool {
+    if session.session_uid == lookup {
+        return true;
+    }
+    if session.shared_session_uid.as_deref() == Some(lookup) {
+        return true;
+    }
+    session_uid_aliases(session)
+        .iter()
+        .any(|alias| alias == lookup)
+}
+
+fn ensure_shared_session_uid(session: &mut SteadSession) -> bool {
+    if session.shared_session_uid.is_none() {
+        session.shared_session_uid = Some(session.session_uid.clone());
+        return true;
+    }
+    false
+}
+
+fn add_session_uid_alias(session: &mut SteadSession, alias: &str) {
+    if alias.is_empty() || alias == session.session_uid {
+        return;
+    }
+    let entry = session
+        .extensions
+        .entry("session_uid_aliases".to_string())
+        .or_insert_with(|| json!([]));
+    if !entry.is_array() {
+        *entry = json!([]);
+    }
+    if let Some(arr) = entry.as_array_mut() {
+        if arr.iter().any(|v| v.as_str() == Some(alias)) {
+            return;
+        }
+        arr.push(Value::String(alias.to_string()));
+    }
+}
+
+fn session_uid_aliases(session: &SteadSession) -> Vec<String> {
+    session
+        .extensions
+        .get("session_uid_aliases")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn dedupe_strings(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for value in values {
+        if seen.insert(value.clone()) {
+            out.push(value);
+        }
+    }
+    out
+}
+
+fn upsert_backend_raw_lines(anchor_raw: &mut Value, incoming: &SteadSession) {
+    let Some(lines) = incoming
+        .raw_vendor_payload
+        .get("lines")
+        .and_then(|v| v.as_array())
+        .cloned()
+    else {
+        return;
+    };
+
+    if !anchor_raw.is_object() {
+        *anchor_raw = json!({});
+    }
+    let Some(raw_obj) = anchor_raw.as_object_mut() else {
+        return;
+    };
+    let backend_lines = raw_obj
+        .entry("backend_lines".to_string())
+        .or_insert_with(|| json!({}));
+    if !backend_lines.is_object() {
+        *backend_lines = json!({});
+    }
+    if let Some(map) = backend_lines.as_object_mut() {
+        map.insert(
+            incoming.source.backend.as_str().to_string(),
+            Value::Array(lines),
+        );
+    }
 }
 
 fn set_native_ref(session: &mut SteadSession, backend: Backend, native_id: &str, path: &Path) {
@@ -602,11 +877,16 @@ fn choose_native_id(session: &SteadSession, backend: Backend) -> String {
     if source_backend_matches(session.source.backend, backend) {
         return session.source.original_session_id.clone();
     }
-    format!(
-        "bridge-{}-{}",
-        backend_key(backend),
-        short_hash(&session.session_uid)
-    )
+    deterministic_backend_uuid(session, backend).to_string()
+}
+
+fn deterministic_backend_uuid(session: &SteadSession, backend: Backend) -> Uuid {
+    let shared = session
+        .shared_session_uid
+        .as_deref()
+        .unwrap_or(session.session_uid.as_str());
+    let key = format!("stead-native:{}:{}", backend_key(backend), shared);
+    Uuid::new_v5(&Uuid::NAMESPACE_URL, key.as_bytes())
 }
 
 fn source_backend_matches(source_backend: BackendKind, backend: Backend) -> bool {
@@ -628,17 +908,14 @@ fn default_materialized_path(
     backend: Backend,
     native_id: &str,
 ) -> PathBuf {
-    let unix_secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now = Utc::now();
+    let timestamp = now.format("%Y-%m-%dT%H-%M-%S").to_string();
     match backend {
-        Backend::Codex => base_dir
-            .join("sessions")
-            .join("auto")
-            .join("auto")
-            .join("auto")
-            .join(format!("rollout-{}-{}.jsonl", unix_secs, native_id)),
+        Backend::Codex => codex_sessions_root(base_dir)
+            .join(format!("{:04}", now.year()))
+            .join(format!("{:02}", now.month()))
+            .join(format!("{:02}", now.day()))
+            .join(format!("rollout-{timestamp}-{native_id}.jsonl")),
         Backend::Claude => {
             let slug = repo.display().to_string().replace(['/', '\\'], "-");
             base_dir
@@ -647,6 +924,48 @@ fn default_materialized_path(
                 .join(format!("{}.jsonl", native_id))
         }
     }
+}
+
+fn codex_sessions_root(base_dir: &Path) -> PathBuf {
+    if base_dir
+        .file_name()
+        .is_some_and(|v| v.to_string_lossy().eq_ignore_ascii_case("sessions"))
+    {
+        base_dir.to_path_buf()
+    } else {
+        base_dir.join("sessions")
+    }
+}
+
+fn prune_codex_rollouts_for_native_id(base_dir: &Path, native_id: &str, keep: &Path) -> Result<()> {
+    let root = codex_sessions_root(base_dir);
+    if !root.exists() {
+        return Ok(());
+    }
+    prune_codex_rollouts_in_dir(&root, native_id, keep)
+}
+
+fn prune_codex_rollouts_in_dir(dir: &Path, native_id: &str, keep: &Path) -> Result<()> {
+    let suffix = format!("-{native_id}.jsonl");
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            prune_codex_rollouts_in_dir(&path, native_id, keep)?;
+            continue;
+        }
+        if !file_type.is_file() || path == keep {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|v| v.to_str()) else {
+            continue;
+        };
+        if name.ends_with(&suffix) {
+            std::fs::remove_file(path)?;
+        }
+    }
+    Ok(())
 }
 
 fn backend_key(backend: Backend) -> &'static str {

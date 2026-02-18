@@ -1,9 +1,9 @@
 ---
 source: crates/stead-session-adapters/tests/codex_export_snapshot.rs
-assertion_line: 21
+assertion_line: 23
 expression: exported
 ---
-{"payload":{"cwd":"/path/to/repo","git":{"branch":"rewrite/v1","commit_hash":"def456","repository_url":"https://github.com/example/stead-core.git"},"id":"s-new","model_provider":"unknown"},"timestamp":"2026-02-17T20:00:00+00:00","type":"session_meta"}
+{"payload":{"cli_version":"0.1.0","cwd":"/path/to/repo","git":{"branch":"rewrite/v1","commit_hash":"def456","repository_url":"https://github.com/example/stead-core.git"},"id":"s-new","model_provider":"unknown","originator":"Stead Core","source":"stead-core","timestamp":"2026-02-17T20:00:00+00:00"},"timestamp":"2026-02-17T20:00:00+00:00","type":"session_meta"}
 {"payload":{"content":[{"text":"Import this codex session","type":"input_text"}],"role":"user","type":"message"},"timestamp":"2026-02-17T20:00:01+00:00","type":"response_item"}
 {"payload":{"content":[{"text":"I will inspect the repo first.","type":"output_text"}],"role":"assistant","type":"message"},"timestamp":"2026-02-17T20:00:02+00:00","type":"response_item"}
 {"payload":{"arguments":"{\"cmd\":\"ls -la\"}","call_id":"call_1","name":"exec_command","type":"function_call"},"timestamp":"2026-02-17T20:00:03+00:00","type":"response_item"}

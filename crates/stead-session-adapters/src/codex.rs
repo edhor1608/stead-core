@@ -204,6 +204,7 @@ impl CodexAdapter {
         Ok(SteadSession {
             schema_version: schema_version().to_string(),
             session_uid: build_session_uid(BackendKind::Codex, &original_id),
+            shared_session_uid: None,
             source: SessionSource::new(
                 BackendKind::Codex,
                 &original_id,
@@ -236,7 +237,11 @@ impl CodexAdapter {
             "type": "session_meta",
             "payload": {
                 "id": session.source.original_session_id,
+                "timestamp": ts,
                 "cwd": session.metadata.project_root,
+                "originator": "Stead Core",
+                "cli_version": env!("CARGO_PKG_VERSION"),
+                "source": "stead-core",
                 "model_provider": "unknown"
             }
         });

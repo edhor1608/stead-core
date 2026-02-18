@@ -339,6 +339,7 @@ impl ClaudeAdapter {
         Ok(SteadSession {
             schema_version: schema_version().to_string(),
             session_uid: build_session_uid(BackendKind::ClaudeCode, &session_id),
+            shared_session_uid: None,
             source: SessionSource::new(
                 BackendKind::ClaudeCode,
                 &session_id,

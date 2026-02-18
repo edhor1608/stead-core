@@ -76,6 +76,7 @@ fn session_validation_requires_event_sequence() {
         artifacts: vec![],
         capabilities: serde_json::Map::new(),
         extensions: serde_json::Map::new(),
+        shared_session_uid: Some("stead:shared:abc".to_string()),
         lineage: None,
         raw_vendor_payload: serde_json::json!({}),
     };
@@ -107,6 +108,7 @@ fn session_can_store_optional_lineage_metadata() {
         artifacts: vec![],
         capabilities: serde_json::Map::new(),
         extensions: serde_json::Map::new(),
+        shared_session_uid: Some("stead:shared:child-session".to_string()),
         lineage: Some(SessionLineage {
             root_session_uid: Some(build_session_uid(BackendKind::Codex, "root-session")),
             parent_session_uid: Some(build_session_uid(BackendKind::Codex, "parent-session")),
@@ -119,4 +121,36 @@ fn session_can_store_optional_lineage_metadata() {
     let value = serde_json::to_value(session).expect("serialize with lineage");
     assert_eq!(value["lineage"]["strategy"], "rewind");
     assert_eq!(value["lineage"]["fork_origin_event_uid"], "ev-1");
+}
+
+#[test]
+fn session_can_store_shared_session_uid() {
+    let mut events = sample_events();
+    canonical_sort_events(&mut events);
+
+    let session = SteadSession {
+        schema_version: schema_version().to_string(),
+        session_uid: build_session_uid(BackendKind::Codex, "child-session"),
+        source: SessionSource::new(
+            BackendKind::Codex,
+            "child-session",
+            vec!["/tmp/source.jsonl".into()],
+        ),
+        metadata: SessionMetadata::new(
+            Some("shared".into()),
+            "/Users/jonas/repos/stead".into(),
+            Utc.with_ymd_and_hms(2026, 2, 17, 12, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 2, 17, 12, 0, 1).unwrap(),
+        ),
+        events,
+        artifacts: vec![],
+        capabilities: serde_json::Map::new(),
+        extensions: serde_json::Map::new(),
+        shared_session_uid: Some("stead:shared:123".to_string()),
+        lineage: None,
+        raw_vendor_payload: serde_json::json!({}),
+    };
+
+    let value = serde_json::to_value(session).expect("serialize with shared uid");
+    assert_eq!(value["shared_session_uid"], "stead:shared:123");
 }

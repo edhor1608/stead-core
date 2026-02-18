@@ -1,11 +1,12 @@
 ---
 source: crates/stead-session-model/tests/snapshot_session_json.rs
-assertion_line: 58
+assertion_line: 61
 expression: session
 ---
 {
   "schema_version": "0.1.0",
   "session_uid": "stead:codex:abc",
+  "shared_session_uid": "stead:shared:abc",
   "source": {
     "backend": "codex",
     "original_session_id": "abc",
