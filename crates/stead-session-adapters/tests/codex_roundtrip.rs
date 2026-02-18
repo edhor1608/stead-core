@@ -1,27 +1,11 @@
 use stead_session_adapters::codex::CodexAdapter;
 use tempfile::TempDir;
 
+mod support;
+
 fn setup_codex_home() -> TempDir {
     let temp = TempDir::new().unwrap();
-    let fixture_root = format!(
-        "{}/tests/fixtures/codex/sessions",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    let target_root = temp.path().join("sessions");
-    std::fs::create_dir_all(&target_root).unwrap();
-
-    for entry in walkdir::WalkDir::new(&fixture_root) {
-        let entry = entry.unwrap();
-        if entry.path().is_dir() {
-            continue;
-        }
-        let rel = entry.path().strip_prefix(&fixture_root).unwrap();
-        let target = target_root.join(rel);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).unwrap();
-        }
-        std::fs::copy(entry.path(), target).unwrap();
-    }
+    support::copy_codex_fixture_tree(&temp);
     temp
 }
 
