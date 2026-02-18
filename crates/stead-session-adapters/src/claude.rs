@@ -6,6 +6,7 @@ use stead_session_model::{
     BackendKind, EventKind, EventPayload, SessionMetadata, SessionSource, SteadEvent, SteadSession,
     build_session_uid, canonical_sort_events, schema_version,
 };
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -24,29 +25,37 @@ impl ClaudeAdapter {
     }
 
     pub fn list_sessions(&self) -> Result<Vec<NativeSessionRef>, AdapterError> {
-        let mut out = Vec::new();
+        let mut by_id: HashMap<String, NativeSessionRef> = HashMap::new();
         for file in self.main_session_files() {
             let summary = parse_summary(&file)?;
-            if out.iter().any(|it: &NativeSessionRef| it.native_id == summary.native_id) {
-                continue;
+            match by_id.get(&summary.native_id) {
+                Some(existing) if existing.updated_at >= summary.updated_at => {}
+                _ => {
+                    by_id.insert(summary.native_id.clone(), summary);
+                }
             }
-            out.push(summary);
         }
+        let mut out: Vec<NativeSessionRef> = by_id.into_values().collect();
         out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(out)
     }
 
     pub fn import_session(&self, session_id: &str) -> Result<SteadSession, AdapterError> {
-        let mut main_file: Option<PathBuf> = None;
+        let mut main_file: Option<(PathBuf, DateTime<Utc>)> = None;
         for file in self.main_session_files() {
             let summary = parse_summary(&file)?;
-            if summary.native_id == session_id {
-                main_file = Some(file);
-                break;
+            if summary.native_id != session_id {
+                continue;
+            }
+            match &main_file {
+                Some((_, best_updated_at)) if *best_updated_at >= summary.updated_at => {}
+                _ => {
+                    main_file = Some((file, summary.updated_at));
+                }
             }
         }
 
-        let Some(main_file) = main_file else {
+        let Some((main_file, _)) = main_file else {
             return Err(AdapterError::SessionNotFound(session_id.to_string()));
         };
 
@@ -121,6 +130,7 @@ impl ClaudeAdapter {
             match entry.entry_type.as_deref() {
                 Some("user") | Some("assistant") => {
                     if let Some(message) = entry.message {
+                        let event_uuid = entry.uuid.clone().unwrap_or_else(|| "ev".to_string());
                         match message.content {
                             Content::Text(text) => {
                                 if message.role == "user" && title.is_none() {
@@ -132,11 +142,7 @@ impl ClaudeAdapter {
                                     EventKind::MessageUser
                                 };
                                 events.push(SteadEvent {
-                                    event_uid: format!(
-                                        "{}-{}",
-                                        entry.uuid.clone().unwrap_or_else(|| "ev".to_string()),
-                                        line_number
-                                    ),
+                                    event_uid: format!("{}-{}", event_uuid, line_number),
                                     stream_id: stream_id.to_string(),
                                     line_number: line_number as u64,
                                     sequence: None,
@@ -152,7 +158,12 @@ impl ClaudeAdapter {
                                 });
                             }
                             Content::Items(items) => {
-                                for item in items {
+                                for (item_index, item) in items.into_iter().enumerate() {
+                                    let item_discriminator = item
+                                        .id
+                                        .clone()
+                                        .or(item.tool_use_id.clone())
+                                        .unwrap_or_else(|| format!("item-{}", item_index));
                                     match item.item_type.as_deref() {
                                         Some("text") => {
                                             if let Some(text) = item.text {
@@ -166,9 +177,8 @@ impl ClaudeAdapter {
                                                 };
                                                 events.push(SteadEvent {
                                                     event_uid: format!(
-                                                        "{}-{}",
-                                                        entry.uuid.clone().unwrap_or_else(|| "ev".to_string()),
-                                                        line_number
+                                                        "{}-{}-{}",
+                                                        event_uuid, line_number, item_discriminator
                                                     ),
                                                     stream_id: stream_id.to_string(),
                                                     line_number: line_number as u64,
@@ -187,10 +197,10 @@ impl ClaudeAdapter {
                                         }
                                         Some("tool_use") => {
                                             events.push(SteadEvent {
-                                                event_uid: item
-                                                    .id
-                                                    .clone()
-                                                    .unwrap_or_else(|| format!("tool-{}", line_number)),
+                                                event_uid: format!(
+                                                    "{}-{}-{}",
+                                                    event_uuid, line_number, item_discriminator
+                                                ),
                                                 stream_id: stream_id.to_string(),
                                                 line_number: line_number as u64,
                                                 sequence: None,
@@ -211,9 +221,8 @@ impl ClaudeAdapter {
                                         Some("tool_result") => {
                                             events.push(SteadEvent {
                                                 event_uid: format!(
-                                                    "{}-{}",
-                                                    entry.uuid.clone().unwrap_or_else(|| "ev".to_string()),
-                                                    line_number
+                                                    "{}-{}-{}",
+                                                    event_uuid, line_number, item_discriminator
                                                 ),
                                                 stream_id: stream_id.to_string(),
                                                 line_number: line_number as u64,
