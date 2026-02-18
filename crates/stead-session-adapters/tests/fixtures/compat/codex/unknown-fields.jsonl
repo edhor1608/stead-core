@@ -1,0 +1,4 @@
+{"timestamp":"2026-02-18T10:00:00Z","type":"session_meta","source_version":"2026.2","payload":{"id":"codex-unknown","cwd":"/path/to/repo","workspace_id":"ws-123","model_provider":"test"}}
+{"timestamp":"2026-02-18T10:00:01Z","type":"response_item","trace_id":"trace-abc","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Inspect project status"}],"vendor_extras":{"flag":true,"priority":"high"}}}
+{"timestamp":"2026-02-18T10:00:02Z","type":"response_item","trace_id":"trace-tool","payload":{"type":"function_call","name":"Read","call_id":"tool-123","arguments":"{\"file_path\":\"README.md\"}","vendor_extras":{"source":"custom"}}}
+{"timestamp":"2026-02-18T10:00:03Z","type":"response_item","trace_id":"trace-result","payload":{"type":"function_call_output","call_id":"tool-123","output":"ok","vendor_extras":{"transport":"ipc"}}}

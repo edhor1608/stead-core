@@ -35,7 +35,8 @@ fn canonical_json_snapshot_is_stable() {
     ];
     canonical_sort_events(&mut events);
 
-    let mut source = SessionSource::new(BackendKind::Codex, "abc", vec!["/tmp/source.jsonl".into()]);
+    let mut source =
+        SessionSource::new(BackendKind::Codex, "abc", vec!["/tmp/source.jsonl".into()]);
     source.imported_at = Utc.with_ymd_and_hms(2026, 2, 17, 12, 0, 0).unwrap();
 
     let session = SteadSession {

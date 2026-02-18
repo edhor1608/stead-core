@@ -2,14 +2,14 @@ use crate::{AdapterError, ExportReport, NativeSessionRef};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use stead_session_model::{
-    BackendKind, EventKind, EventPayload, SessionMetadata, SessionSource, SteadEvent, SteadSession,
-    build_session_uid, canonical_sort_events, schema_version,
-};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use stead_session_model::{
+    BackendKind, EventKind, EventPayload, SessionMetadata, SessionSource, SteadEvent, SteadSession,
+    build_session_uid, canonical_sort_events, schema_version,
+};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
@@ -70,12 +70,14 @@ impl ClaudeAdapter {
             if sub_dir.exists() {
                 for entry in WalkDir::new(sub_dir).into_iter().flatten() {
                     let path = entry.path();
-                    if !path.is_file() || !path.extension().is_some_and(|v| v == "jsonl") {
+                    if !path.is_file() || path.extension().is_none_or(|v| v != "jsonl") {
                         continue;
                     }
                     let stream_id = format!(
                         "subagent:{}",
-                        path.file_stem().and_then(|v| v.to_str()).unwrap_or("unknown")
+                        path.file_stem()
+                            .and_then(|v| v.to_str())
+                            .unwrap_or("unknown")
                     );
                     let sub = self.import_from_file(path, &stream_id)?;
                     if sub.source.original_session_id == session_id {
@@ -215,7 +217,8 @@ impl ClaudeAdapter {
                                                 kind: EventKind::ToolCall,
                                                 actor: None,
                                                 payload: EventPayload::tool_call(
-                                                    item.name.unwrap_or_else(|| "unknown".to_string()),
+                                                    item.name
+                                                        .unwrap_or_else(|| "unknown".to_string()),
                                                     item.input.unwrap_or_else(|| json!({})),
                                                 ),
                                                 raw_vendor_payload: raw_lines
@@ -347,7 +350,14 @@ impl ClaudeAdapter {
         let mut file = File::create(output_path.as_ref())?;
 
         for event in &session.events {
-            let line = event_to_claude_line(event, &session.source.original_session_id, &session.metadata.project_root);
+            let line = merge_with_raw_unknowns(
+                event_to_claude_line(
+                    event,
+                    &session.source.original_session_id,
+                    &session.metadata.project_root,
+                ),
+                Some(&event.raw_vendor_payload),
+            );
             writeln!(file, "{}", serde_json::to_string(&line)?)?;
         }
 
@@ -375,7 +385,7 @@ impl ClaudeAdapter {
         let mut out = Vec::new();
         for entry in WalkDir::new(root).into_iter().flatten() {
             let path = entry.path();
-            if !path.is_file() || !path.extension().is_some_and(|ext| ext == "jsonl") {
+            if !path.is_file() || path.extension().is_none_or(|ext| ext != "jsonl") {
                 continue;
             }
             if path.components().any(|c| c.as_os_str() == "subagents") {
@@ -456,6 +466,48 @@ fn event_to_claude_line(event: &SteadEvent, session_id: &str, cwd: &str) -> Valu
     }
 }
 
+fn merge_with_raw_unknowns(generated: Value, raw: Option<&Value>) -> Value {
+    let Some(raw) = raw else {
+        return generated;
+    };
+    let (Some(raw_type), Some(generated_type)) = (
+        raw.get("type").and_then(|v| v.as_str()),
+        generated.get("type").and_then(|v| v.as_str()),
+    ) else {
+        return generated;
+    };
+    if raw_type != generated_type {
+        return generated;
+    }
+    merge_value_objects(raw.clone(), generated)
+}
+
+fn merge_value_objects(raw: Value, generated: Value) -> Value {
+    match (raw, generated) {
+        (Value::Object(mut raw_map), Value::Object(generated_map)) => {
+            for (key, generated_value) in generated_map {
+                let merged = match raw_map.remove(&key) {
+                    Some(raw_value) => merge_value_objects(raw_value, generated_value),
+                    None => generated_value,
+                };
+                raw_map.insert(key, merged);
+            }
+            Value::Object(raw_map)
+        }
+        (Value::Array(raw_values), Value::Array(generated_values)) => Value::Array(
+            generated_values
+                .into_iter()
+                .enumerate()
+                .map(|(index, generated_value)| match raw_values.get(index) {
+                    Some(raw_value) => merge_value_objects(raw_value.clone(), generated_value),
+                    None => generated_value,
+                })
+                .collect(),
+        ),
+        (_, generated_other) => generated_other,
+    }
+}
+
 fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
@@ -477,16 +529,17 @@ fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
         if updated.is_none() || updated.is_some_and(|v| ts > v) {
             updated = Some(ts);
         }
-        if title.is_none() && entry.entry_type.as_deref() == Some("user") {
-            if let Some(message) = entry.message {
-                match message.content {
-                    Content::Text(text) => title = Some(text),
-                    Content::Items(items) => {
-                        title = items.into_iter().find_map(|item| item.text);
-                    }
-                    Content::Raw(value) => {
-                        let _ = value;
-                    }
+        if title.is_none()
+            && entry.entry_type.as_deref() == Some("user")
+            && let Some(message) = entry.message
+        {
+            match message.content {
+                Content::Text(text) => title = Some(text),
+                Content::Items(items) => {
+                    title = items.into_iter().find_map(|item| item.text);
+                }
+                Content::Raw(value) => {
+                    let _ = value;
                 }
             }
         }

@@ -164,3 +164,37 @@
 ### Lessons learned
 - Local user histories contain heterogeneous historical formats; strict per-file parsing in discovery paths is too brittle.
 - Compatibility tests must include real-world path variants (`root` vs `leaf`) to avoid “works on fixtures only” regressions.
+
+## Milestone 7: Hardening + Release Prep
+
+### Problem solved
+- Prepare a stable milestone baseline with release metadata and reproducible checks.
+- Add compatibility guardrails that catch lossiness in adapter round-trips.
+- Add a first-class handoff command to switch backends from canonical sessions in one step.
+
+### What was implemented
+- Release baseline artifacts:
+  - `CHANGELOG.md` with `v0.1.0-m1`,
+  - `docs/release-baseline-v0.1.0-m1.md` (branch protection/CI status at baseline),
+  - git tag `v0.1.0-m1`.
+- Compatibility suite:
+  - `crates/stead-session-adapters/tests/compat_guardrails.rs`,
+  - new Codex/Claude compatibility fixtures with unknown vendor fields,
+  - strict round-trip checks for event/timestamp and tool-call/tool-result linkage.
+- Adapter hardening:
+  - Codex import now stores full raw JSON lines per event (not schema-trimmed envelopes),
+  - Codex/Claude export now deep-merges generated lines with raw vendor payload to preserve unknown fields.
+- New CLI workflow:
+  - `stead-core handoff --session <id> --to codex|claude --resume "<prompt>"`,
+  - wraps materialize-if-needed + resume.
+- CI automation:
+  - `.github/workflows/ci.yml` (`cargo test`, `fmt`, `clippy`),
+  - `.github/workflows/nightly-smoke.yml` (adapter + CLI smoke suites).
+
+### Key decisions
+- Preserve generated canonical semantics first; retain vendor-specific unknown fields via selective raw-line merge when line type matches.
+- Keep `handoff` as a thin orchestration command that reuses existing `resume` flow to avoid duplicated logic.
+
+### Lessons learned
+- Lossless round-trip behavior requires preserving full raw line objects at import time; partial typed payload capture is insufficient.
+- Array-aware deep merge is required to retain unknown nested fields in vendor content arrays (e.g., Claude `message.content[*]` extras).

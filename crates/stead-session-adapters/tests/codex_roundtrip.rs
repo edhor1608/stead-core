@@ -15,7 +15,9 @@ fn codex_import_export_import_roundtrip_preserves_core_semantics() {
     let adapter = CodexAdapter::from_base_dir(temp.path());
     let session = adapter.import_session("s-new").expect("first import");
 
-    let out = temp.path().join("sessions/2026/02/18/rollout-2026-02-18T00-00-00-s-new-roundtrip.jsonl");
+    let out = temp
+        .path()
+        .join("sessions/2026/02/18/rollout-2026-02-18T00-00-00-s-new-roundtrip.jsonl");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }

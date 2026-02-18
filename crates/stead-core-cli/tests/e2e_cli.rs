@@ -57,9 +57,11 @@ fn parse_jsonl_lines(raw: &str) -> Vec<Value> {
 }
 
 fn assert_jsonl_has_type(lines: &[Value], expected_type: &str) {
-    assert!(lines.iter().any(|line| {
-        line.get("type") == Some(&Value::String(expected_type.to_string()))
-    }));
+    assert!(
+        lines
+            .iter()
+            .any(|line| { line.get("type") == Some(&Value::String(expected_type.to_string())) })
+    );
 }
 #[test]
 fn list_sessions_from_codex_backend_as_json() {
@@ -321,7 +323,11 @@ fn sync_imports_codex_and_claude_sessions_into_repo_store() {
     let sessions = list_canonical_sessions(repo.path());
     assert!(!sessions.is_empty());
     assert!(sessions.iter().any(|s| s["source"]["backend"] == "codex"));
-    assert!(sessions.iter().any(|s| s["source"]["backend"] == "claude_code"));
+    assert!(
+        sessions
+            .iter()
+            .any(|s| s["source"]["backend"] == "claude_code")
+    );
 }
 
 #[test]
@@ -353,7 +359,11 @@ fn sync_accepts_leaf_backend_directories() {
     let sessions = list_canonical_sessions(repo.path());
     assert!(!sessions.is_empty());
     assert!(sessions.iter().any(|s| s["source"]["backend"] == "codex"));
-    assert!(sessions.iter().any(|s| s["source"]["backend"] == "claude_code"));
+    assert!(
+        sessions
+            .iter()
+            .any(|s| s["source"]["backend"] == "claude_code")
+    );
 }
 
 #[test]
@@ -403,15 +413,21 @@ fn sync_scopes_to_repo_when_matching_sessions_exist() {
 
     let sessions = list_canonical_sessions(repo.path());
     assert_eq!(sessions.len(), 2);
-    assert!(sessions
-        .iter()
-        .any(|s| s["source"]["original_session_id"] == "s-new"));
-    assert!(!sessions
-        .iter()
-        .any(|s| s["source"]["original_session_id"] == "s-old"));
-    assert!(sessions
-        .iter()
-        .any(|s| s["source"]["original_session_id"] == "claude-main"));
+    assert!(
+        sessions
+            .iter()
+            .any(|s| s["source"]["original_session_id"] == "s-new")
+    );
+    assert!(
+        !sessions
+            .iter()
+            .any(|s| s["source"]["original_session_id"] == "s-old")
+    );
+    assert!(
+        sessions
+            .iter()
+            .any(|s| s["source"]["original_session_id"] == "claude-main")
+    );
 }
 
 #[test]
@@ -556,4 +572,176 @@ fn resume_uses_backend_resume_flag_with_prompt() {
     assert!(logged.contains("--resume"));
     assert!(logged.contains(expected_native_id));
     assert!(logged.contains("Continue with tests"));
+}
+
+#[test]
+#[cfg(unix)]
+fn handoff_uses_existing_native_ref_and_resume_prompt() {
+    let repo = TempDir::new().unwrap();
+    let codex_home = TempDir::new().unwrap();
+    let claude_home = TempDir::new().unwrap();
+
+    let codex_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/codex");
+    let claude_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/claude");
+    copy_tree(&codex_fixture, codex_home.path());
+    copy_tree(&claude_fixture, claude_home.path());
+
+    stead_core()
+        .args([
+            "sync",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--codex-base",
+            codex_home.path().to_str().unwrap(),
+            "--claude-base",
+            claude_home.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let sessions = list_canonical_sessions(repo.path());
+    let codex_session = sessions
+        .iter()
+        .find(|s| s["source"]["backend"] == "codex")
+        .unwrap();
+    let canonical_id = codex_session["session_uid"].as_str().unwrap();
+    let expected_native_id = codex_session["extensions"]["native_refs"]["codex"]["session_id"]
+        .as_str()
+        .unwrap();
+
+    let runner_log = repo.path().join("runner-handoff.log");
+    let runner_script = repo.path().join("runner-handoff.sh");
+    std::fs::write(
+        &runner_script,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{}\"\n",
+            runner_log.display()
+        ),
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&runner_script).unwrap().permissions();
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&runner_script, perms).unwrap();
+
+    stead_core()
+        .env("STEAD_CORE_RUNNER", runner_script.to_str().unwrap())
+        .args([
+            "handoff",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--session",
+            canonical_id,
+            "--to",
+            "codex",
+            "--resume",
+            "Continue handoff",
+        ])
+        .assert()
+        .success();
+
+    let logged = std::fs::read_to_string(runner_log).unwrap();
+    assert!(logged.contains("codex"));
+    assert!(logged.contains("--resume"));
+    assert!(logged.contains(expected_native_id));
+    assert!(logged.contains("Continue handoff"));
+}
+
+#[test]
+#[cfg(unix)]
+fn handoff_materializes_target_backend_before_resume_when_needed() {
+    let repo = TempDir::new().unwrap();
+    let codex_home = TempDir::new().unwrap();
+    let claude_home = TempDir::new().unwrap();
+
+    let codex_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/codex");
+    let claude_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/claude");
+    copy_tree(&codex_fixture, codex_home.path());
+    copy_tree(&claude_fixture, claude_home.path());
+
+    stead_core()
+        .args([
+            "sync",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--codex-base",
+            codex_home.path().to_str().unwrap(),
+            "--claude-base",
+            claude_home.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let sessions = list_canonical_sessions(repo.path());
+    let codex_session = sessions
+        .iter()
+        .find(|s| s["source"]["backend"] == "codex")
+        .unwrap();
+    let canonical_id = codex_session["session_uid"].as_str().unwrap();
+
+    let materialized_out = claude_home
+        .path()
+        .join("projects/-Users-jonas-repos-stead-core/handoff-materialized.jsonl");
+    if let Some(parent) = materialized_out.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+
+    let runner_log = repo.path().join("runner-handoff-materialize.log");
+    let runner_script = repo.path().join("runner-handoff-materialize.sh");
+    std::fs::write(
+        &runner_script,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{}\"\n",
+            runner_log.display()
+        ),
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&runner_script).unwrap().permissions();
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&runner_script, perms).unwrap();
+
+    stead_core()
+        .env("STEAD_CORE_RUNNER", runner_script.to_str().unwrap())
+        .args([
+            "handoff",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--session",
+            canonical_id,
+            "--to",
+            "claude",
+            "--base-dir",
+            claude_home.path().to_str().unwrap(),
+            "--out",
+            materialized_out.to_str().unwrap(),
+            "--resume",
+            "Continue in claude",
+        ])
+        .assert()
+        .success();
+
+    assert!(materialized_out.exists());
+    let refreshed = list_canonical_sessions(repo.path());
+    let updated = refreshed
+        .iter()
+        .find(|s| s["session_uid"] == canonical_id)
+        .unwrap();
+    let native_id = updated["extensions"]["native_refs"]["claude"]["session_id"]
+        .as_str()
+        .unwrap();
+    let native_path = updated["extensions"]["native_refs"]["claude"]["path"]
+        .as_str()
+        .unwrap();
+    assert_eq!(native_path, materialized_out.to_str().unwrap());
+
+    let logged = std::fs::read_to_string(runner_log).unwrap();
+    assert!(logged.contains("claude"));
+    assert!(logged.contains("--resume"));
+    assert!(logged.contains(native_id));
+    assert!(logged.contains("Continue in claude"));
 }

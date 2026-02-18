@@ -7,9 +7,9 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use twox_hash::XxHash64;
 
+use stead_session_adapters::NativeSessionRef;
 use stead_session_adapters::claude::ClaudeAdapter;
 use stead_session_adapters::codex::CodexAdapter;
-use stead_session_adapters::NativeSessionRef;
 use stead_session_model::{BackendKind, SteadSession};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -106,6 +106,22 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    Handoff {
+        #[arg(long)]
+        repo: PathBuf,
+        #[arg(long)]
+        session: String,
+        #[arg(long = "to", value_enum)]
+        to: Backend,
+        #[arg(long = "resume")]
+        resume_prompt: String,
+        #[arg(long)]
+        base_dir: Option<PathBuf>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -173,6 +189,15 @@ fn main() -> Result<()> {
             out,
             json,
         } => run_resume(repo, &session, backend, &prompt, base_dir, out, json),
+        Commands::Handoff {
+            repo,
+            session,
+            to,
+            resume_prompt,
+            base_dir,
+            out,
+            json,
+        } => run_handoff(repo, &session, to, &resume_prompt, base_dir, out, json),
     }
 }
 
@@ -270,7 +295,12 @@ fn run_convert(
     Ok(())
 }
 
-fn run_sync(repo: PathBuf, codex_base: PathBuf, claude_base: PathBuf, json_out: bool) -> Result<()> {
+fn run_sync(
+    repo: PathBuf,
+    codex_base: PathBuf,
+    claude_base: PathBuf,
+    json_out: bool,
+) -> Result<()> {
     std::fs::create_dir_all(canonical_store_dir(&repo))?;
 
     let mut imported = Vec::new();
@@ -279,7 +309,12 @@ fn run_sync(repo: PathBuf, codex_base: PathBuf, claude_base: PathBuf, json_out: 
     let codex_sessions = codex.list_sessions()?;
     for native in scope_sessions_to_repo(&repo, codex_sessions) {
         let mut session = codex.import_from_file(&native.file_path)?;
-        set_native_ref(&mut session, Backend::Codex, &native.native_id, &native.file_path);
+        set_native_ref(
+            &mut session,
+            Backend::Codex,
+            &native.native_id,
+            &native.file_path,
+        );
         let stored = store_canonical_session(&repo, &session)?;
         imported.push(json!({
             "backend": "codex",
@@ -293,7 +328,12 @@ fn run_sync(repo: PathBuf, codex_base: PathBuf, claude_base: PathBuf, json_out: 
     let claude_sessions = claude.list_sessions()?;
     for native in scope_sessions_to_repo(&repo, claude_sessions) {
         let mut session = claude.import_session(&native.native_id)?;
-        set_native_ref(&mut session, Backend::Claude, &native.native_id, &native.file_path);
+        set_native_ref(
+            &mut session,
+            Backend::Claude,
+            &native.native_id,
+            &native.file_path,
+        );
         let stored = store_canonical_session(&repo, &session)?;
         imported.push(json!({
             "backend": "claude",
@@ -306,7 +346,11 @@ fn run_sync(repo: PathBuf, codex_base: PathBuf, claude_base: PathBuf, json_out: 
     if json_out {
         println!("{}", serde_json::to_string(&imported)?);
     } else {
-        println!("synced {} sessions into {}", imported.len(), canonical_store_dir(&repo).display());
+        println!(
+            "synced {} sessions into {}",
+            imported.len(),
+            canonical_store_dir(&repo).display()
+        );
     }
     Ok(())
 }
@@ -321,7 +365,8 @@ fn run_materialize(
 ) -> Result<()> {
     let mut session = load_canonical_session(&repo, session_uid)?;
     let native_id = choose_native_id(&session, to);
-    let output_path = out.unwrap_or_else(|| default_materialized_path(&base_dir, &repo, to, &native_id));
+    let output_path =
+        out.unwrap_or_else(|| default_materialized_path(&base_dir, &repo, to, &native_id));
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -329,10 +374,13 @@ fn run_materialize(
     let mut export_session = session.clone();
     export_session.source.original_session_id = native_id.clone();
 
-    let report = match to {
-        Backend::Codex => CodexAdapter::from_base_dir(base_dir).export_session(&export_session, &output_path)?,
-        Backend::Claude => ClaudeAdapter::from_base_dir(base_dir).export_session(&export_session, &output_path)?,
-    };
+    let report =
+        match to {
+            Backend::Codex => CodexAdapter::from_base_dir(base_dir)
+                .export_session(&export_session, &output_path)?,
+            Backend::Claude => ClaudeAdapter::from_base_dir(base_dir)
+                .export_session(&export_session, &output_path)?,
+        };
 
     set_native_ref(&mut session, to, &native_id, &output_path);
     store_canonical_session(&repo, &session)?;
@@ -369,10 +417,14 @@ fn run_resume(
         found
     } else {
         let Some(base_dir) = base_dir else {
-            bail!("missing native projection for backend `{}`; provide --base-dir to materialize", backend_key(backend));
+            bail!(
+                "missing native projection for backend `{}`; provide --base-dir to materialize",
+                backend_key(backend)
+            );
         };
         let native_id = choose_native_id(&session, backend);
-        let output_path = out.unwrap_or_else(|| default_materialized_path(&base_dir, &repo, backend, &native_id));
+        let output_path =
+            out.unwrap_or_else(|| default_materialized_path(&base_dir, &repo, backend, &native_id));
         if let Some(parent) = output_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -381,10 +433,12 @@ fn run_resume(
         export_session.source.original_session_id = native_id.clone();
         match backend {
             Backend::Codex => {
-                CodexAdapter::from_base_dir(base_dir).export_session(&export_session, &output_path)?;
+                CodexAdapter::from_base_dir(base_dir)
+                    .export_session(&export_session, &output_path)?;
             }
             Backend::Claude => {
-                ClaudeAdapter::from_base_dir(base_dir).export_session(&export_session, &output_path)?;
+                ClaudeAdapter::from_base_dir(base_dir)
+                    .export_session(&export_session, &output_path)?;
             }
         }
         set_native_ref(&mut session, backend, &native_id, &output_path);
@@ -398,8 +452,12 @@ fn run_resume(
             .status()?
     } else {
         let bin = match backend {
-            Backend::Codex => std::env::var("STEAD_CORE_CODEX_BIN").unwrap_or_else(|_| "codex".to_string()),
-            Backend::Claude => std::env::var("STEAD_CORE_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_string()),
+            Backend::Codex => {
+                std::env::var("STEAD_CORE_CODEX_BIN").unwrap_or_else(|_| "codex".to_string())
+            }
+            Backend::Claude => {
+                std::env::var("STEAD_CORE_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_string())
+            }
         };
         Command::new(bin)
             .args(["--resume", &native_id, prompt])
@@ -428,6 +486,26 @@ fn run_resume(
     Ok(())
 }
 
+fn run_handoff(
+    repo: PathBuf,
+    session_uid: &str,
+    to: Backend,
+    resume_prompt: &str,
+    base_dir: Option<PathBuf>,
+    out: Option<PathBuf>,
+    json_out: bool,
+) -> Result<()> {
+    run_resume(
+        repo,
+        session_uid,
+        to,
+        resume_prompt,
+        base_dir,
+        out,
+        json_out,
+    )
+}
+
 fn canonical_store_dir(repo: &Path) -> PathBuf {
     repo.join(".stead-core").join("sessions")
 }
@@ -435,7 +513,13 @@ fn canonical_store_dir(repo: &Path) -> PathBuf {
 fn canonical_session_path(repo: &Path, session_uid: &str) -> PathBuf {
     let sanitized: String = session_uid
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let file_name = if sanitized.is_empty() {
         format!("session-{}", short_hash(session_uid))
@@ -463,7 +547,10 @@ fn load_canonical_session(repo: &Path, session_uid: &str) -> Result<SteadSession
 
     let store = canonical_store_dir(repo);
     if !store.exists() {
-        return Err(anyhow!("canonical store does not exist at {}", store.display()));
+        return Err(anyhow!(
+            "canonical store does not exist at {}",
+            store.display()
+        ));
     }
     for entry in std::fs::read_dir(&store)? {
         let path = entry?.path();
@@ -515,7 +602,11 @@ fn choose_native_id(session: &SteadSession, backend: Backend) -> String {
     if source_backend_matches(session.source.backend, backend) {
         return session.source.original_session_id.clone();
     }
-    format!("bridge-{}-{}", backend_key(backend), short_hash(&session.session_uid))
+    format!(
+        "bridge-{}-{}",
+        backend_key(backend),
+        short_hash(&session.session_uid)
+    )
 }
 
 fn source_backend_matches(source_backend: BackendKind, backend: Backend) -> bool {
@@ -531,7 +622,12 @@ fn short_hash(value: &str) -> String {
     format!("{:016x}", hasher.finish())[..8].to_string()
 }
 
-fn default_materialized_path(base_dir: &Path, repo: &Path, backend: Backend, native_id: &str) -> PathBuf {
+fn default_materialized_path(
+    base_dir: &Path,
+    repo: &Path,
+    backend: Backend,
+    native_id: &str,
+) -> PathBuf {
     let unix_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -545,7 +641,10 @@ fn default_materialized_path(base_dir: &Path, repo: &Path, backend: Backend, nat
             .join(format!("rollout-{}-{}.jsonl", unix_secs, native_id)),
         Backend::Claude => {
             let slug = repo.display().to_string().replace(['/', '\\'], "-");
-            base_dir.join("projects").join(slug).join(format!("{}.jsonl", native_id))
+            base_dir
+                .join("projects")
+                .join(slug)
+                .join(format!("{}.jsonl", native_id))
         }
     }
 }

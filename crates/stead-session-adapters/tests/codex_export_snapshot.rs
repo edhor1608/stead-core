@@ -11,7 +11,9 @@ fn exported_codex_jsonl_snapshot_is_stable() {
 
     let adapter = CodexAdapter::from_base_dir(temp.path());
     let session = adapter.import_session("s-new").expect("import");
-    let out = temp.path().join("sessions/2026/02/19/rollout-2026-02-19T00-00-00-s-snapshot.jsonl");
+    let out = temp
+        .path()
+        .join("sessions/2026/02/19/rollout-2026-02-19T00-00-00-s-snapshot.jsonl");
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
