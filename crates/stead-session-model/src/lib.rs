@@ -185,6 +185,18 @@ pub struct SessionArtifactRef {
     pub extensions: Map<String, Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct SessionLineage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_session_uid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_session_uid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fork_origin_event_uid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SteadSession {
     pub schema_version: String,
@@ -198,6 +210,8 @@ pub struct SteadSession {
     pub capabilities: Map<String, Value>,
     #[serde(default)]
     pub extensions: Map<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<SessionLineage>,
     pub raw_vendor_payload: Value,
 }
 

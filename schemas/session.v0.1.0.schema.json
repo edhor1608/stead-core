@@ -158,6 +158,39 @@
     "extensions": {
       "type": "object"
     },
+    "lineage": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "root_session_uid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_session_uid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fork_origin_event_uid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strategy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
     "raw_vendor_payload": {}
   },
   "additionalProperties": true

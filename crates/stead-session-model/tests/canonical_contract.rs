@@ -1,7 +1,8 @@
 use chrono::{TimeZone, Utc};
 use stead_session_model::{
-    BackendKind, EventActor, EventKind, EventPayload, SessionMetadata, SessionSource, SteadEvent,
-    SteadSession, SteadSessionError, build_session_uid, canonical_sort_events, schema_version,
+    BackendKind, EventActor, EventKind, EventPayload, SessionLineage, SessionMetadata,
+    SessionSource, SteadEvent, SteadSession, SteadSessionError, build_session_uid,
+    canonical_sort_events, schema_version,
 };
 
 fn sample_events() -> Vec<SteadEvent> {
@@ -75,9 +76,47 @@ fn session_validation_requires_event_sequence() {
         artifacts: vec![],
         capabilities: serde_json::Map::new(),
         extensions: serde_json::Map::new(),
+        lineage: None,
         raw_vendor_payload: serde_json::json!({}),
     };
 
     let err = session.validate().expect_err("missing sequence must fail");
     assert!(matches!(err, SteadSessionError::MissingSequence { .. }));
+}
+
+#[test]
+fn session_can_store_optional_lineage_metadata() {
+    let mut events = sample_events();
+    canonical_sort_events(&mut events);
+
+    let session = SteadSession {
+        schema_version: schema_version().to_string(),
+        session_uid: build_session_uid(BackendKind::Codex, "child-session"),
+        source: SessionSource::new(
+            BackendKind::Codex,
+            "child-session",
+            vec!["/tmp/source.jsonl".into()],
+        ),
+        metadata: SessionMetadata::new(
+            Some("lineage".into()),
+            "/Users/jonas/repos/stead".into(),
+            Utc.with_ymd_and_hms(2026, 2, 17, 12, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 2, 17, 12, 0, 1).unwrap(),
+        ),
+        events,
+        artifacts: vec![],
+        capabilities: serde_json::Map::new(),
+        extensions: serde_json::Map::new(),
+        lineage: Some(SessionLineage {
+            root_session_uid: Some(build_session_uid(BackendKind::Codex, "root-session")),
+            parent_session_uid: Some(build_session_uid(BackendKind::Codex, "parent-session")),
+            fork_origin_event_uid: Some("ev-1".into()),
+            strategy: Some("rewind".into()),
+        }),
+        raw_vendor_payload: serde_json::json!({}),
+    };
+
+    let value = serde_json::to_value(session).expect("serialize with lineage");
+    assert_eq!(value["lineage"]["strategy"], "rewind");
+    assert_eq!(value["lineage"]["fork_origin_event_uid"], "ev-1");
 }

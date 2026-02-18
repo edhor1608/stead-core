@@ -124,3 +124,102 @@ fn import_session_parses_non_string_tool_result_content() {
             .any(|e| e.kind == EventKind::ToolResult)
     );
 }
+
+#[test]
+fn list_sessions_dedupes_split_files_by_latest_update() {
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("projects").join("-Users-test-repo");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    std::fs::write(
+        project_dir.join("split-a.jsonl"),
+        concat!(
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"sessionId\":\"claude-rewind\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-02-17T00:00:01Z\",\"sessionId\":\"claude-rewind\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"step one\"}]}}\n"
+        ),
+    )
+    .unwrap();
+
+    std::fs::write(
+        project_dir.join("split-b.jsonl"),
+        concat!(
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"sessionId\":\"claude-rewind\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-02-17T00:00:01Z\",\"sessionId\":\"claude-rewind\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"step one\"}]}}\n",
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:02Z\",\"sessionId\":\"claude-rewind\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"message\":{\"role\":\"user\",\"content\":\"rewind branch\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    let adapter = ClaudeAdapter::from_base_dir(temp.path());
+    let sessions = adapter.list_sessions().expect("list split sessions");
+
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].native_id, "claude-rewind");
+    assert!(sessions[0].file_path.ends_with("split-b.jsonl"));
+}
+
+#[test]
+fn import_session_merges_split_files_and_preserves_lineage_payload() {
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("projects").join("-Users-test-repo");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    std::fs::write(
+        project_dir.join("split-a.jsonl"),
+        concat!(
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"sessionId\":\"claude-rewind\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-02-17T00:00:01Z\",\"sessionId\":\"claude-rewind\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"step one\"}]}}\n"
+        ),
+    )
+    .unwrap();
+
+    std::fs::write(
+        project_dir.join("split-b.jsonl"),
+        concat!(
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"sessionId\":\"claude-rewind\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-02-17T00:00:01Z\",\"sessionId\":\"claude-rewind\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"step one\"}]}}\n",
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:02Z\",\"sessionId\":\"claude-rewind\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"message\":{\"role\":\"user\",\"content\":\"rewind branch\"}}\n",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-02-17T00:00:03Z\",\"sessionId\":\"claude-rewind\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"a2\",\"parentUuid\":\"u2\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"branch response\"}]}}\n"
+        ),
+    )
+    .unwrap();
+
+    let adapter = ClaudeAdapter::from_base_dir(temp.path());
+    let session = adapter
+        .import_session("claude-rewind")
+        .expect("import split session");
+
+    assert_eq!(session.source.original_session_id, "claude-rewind");
+    assert_eq!(session.events.len(), 4);
+    assert_eq!(session.source.source_files.len(), 2);
+    assert!(
+        session
+            .source
+            .source_files
+            .iter()
+            .any(|path| path.ends_with("split-a.jsonl"))
+    );
+    assert!(
+        session
+            .source
+            .source_files
+            .iter()
+            .any(|path| path.ends_with("split-b.jsonl"))
+    );
+
+    assert!(session.events.iter().all(|event| {
+        event
+            .extensions
+            .get("source_file")
+            .and_then(|value| value.as_str())
+            .is_some()
+    }));
+
+    assert!(session.events.iter().any(|event| {
+        event
+            .raw_vendor_payload
+            .get("parentUuid")
+            .and_then(|value| value.as_str())
+            == Some("u2")
+    }));
+}

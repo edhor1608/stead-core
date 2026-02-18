@@ -1,8 +1,9 @@
 use jsonschema::validator_for;
 use serde_json::json;
 use stead_session_model::{
-    BackendKind, EventActor, EventKind, EventPayload, SessionMetadata, SessionSource, SteadEvent,
-    SteadSession, build_session_uid, canonical_sort_events, schema_version,
+    BackendKind, EventActor, EventKind, EventPayload, SessionLineage, SessionMetadata,
+    SessionSource, SteadEvent, SteadSession, build_session_uid, canonical_sort_events,
+    schema_version,
 };
 
 fn load_schema() -> serde_json::Value {
@@ -38,6 +39,12 @@ fn valid_session() -> SteadSession {
         artifacts: vec![],
         capabilities: serde_json::Map::new(),
         extensions: serde_json::Map::new(),
+        lineage: Some(SessionLineage {
+            root_session_uid: Some(build_session_uid(BackendKind::Codex, "root")),
+            parent_session_uid: Some(build_session_uid(BackendKind::Codex, "parent")),
+            fork_origin_event_uid: Some("ev-1".to_string()),
+            strategy: Some("rewind".to_string()),
+        }),
         raw_vendor_payload: json!({}),
     }
 }
