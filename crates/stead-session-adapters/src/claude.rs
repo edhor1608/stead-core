@@ -27,7 +27,9 @@ impl ClaudeAdapter {
     pub fn list_sessions(&self) -> Result<Vec<NativeSessionRef>, AdapterError> {
         let mut by_id: HashMap<String, NativeSessionRef> = HashMap::new();
         for file in self.main_session_files() {
-            let summary = parse_summary(&file)?;
+            let Ok(summary) = parse_summary(&file) else {
+                continue;
+            };
             match by_id.get(&summary.native_id) {
                 Some(existing) if existing.updated_at >= summary.updated_at => {}
                 _ => {
@@ -43,7 +45,9 @@ impl ClaudeAdapter {
     pub fn import_session(&self, session_id: &str) -> Result<SteadSession, AdapterError> {
         let mut main_file: Option<(PathBuf, DateTime<Utc>)> = None;
         for file in self.main_session_files() {
-            let summary = parse_summary(&file)?;
+            let Ok(summary) = parse_summary(&file) else {
+                continue;
+            };
             if summary.native_id != session_id {
                 continue;
             }
@@ -233,7 +237,7 @@ impl ClaudeAdapter {
                                                 payload: EventPayload::ToolResult {
                                                     call_id,
                                                     ok: !item.is_error.unwrap_or(false),
-                                                    output_text: item.content,
+                                                    output_text: value_to_text(item.content),
                                                     error_text: None,
                                                 },
                                                 raw_vendor_payload: raw_lines
@@ -246,6 +250,36 @@ impl ClaudeAdapter {
                                         _ => {}
                                     }
                                 }
+                            }
+                            Content::Raw(value) => {
+                                let text = value.to_string();
+                                if message.role == "user" && title.is_none() {
+                                    title = Some(text.clone());
+                                }
+                                let kind = if message.role == "assistant" {
+                                    EventKind::MessageAssistant
+                                } else {
+                                    EventKind::MessageUser
+                                };
+                                events.push(SteadEvent {
+                                    event_uid: format!(
+                                        "{}-{}",
+                                        entry.uuid.clone().unwrap_or_else(|| "ev".to_string()),
+                                        line_number
+                                    ),
+                                    stream_id: stream_id.to_string(),
+                                    line_number: line_number as u64,
+                                    sequence: None,
+                                    timestamp: ts,
+                                    kind,
+                                    actor: None,
+                                    payload: EventPayload::text(text),
+                                    raw_vendor_payload: raw_lines
+                                        .last()
+                                        .cloned()
+                                        .unwrap_or_else(|| json!({})),
+                                    extensions: Map::new(),
+                                });
                             }
                         }
                     }
@@ -326,7 +360,15 @@ impl ClaudeAdapter {
     }
 
     fn main_session_files(&self) -> Vec<PathBuf> {
-        let root = self.base_dir.join("projects");
+        let root = if self
+            .base_dir
+            .file_name()
+            .is_some_and(|v| v.to_string_lossy().eq_ignore_ascii_case("projects"))
+        {
+            self.base_dir.clone()
+        } else {
+            self.base_dir.join("projects")
+        };
         if !root.exists() {
             return Vec::new();
         }
@@ -442,6 +484,9 @@ fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
                     Content::Items(items) => {
                         title = items.into_iter().find_map(|item| item.text);
                     }
+                    Content::Raw(value) => {
+                        let _ = value;
+                    }
                 }
             }
         }
@@ -464,6 +509,14 @@ fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
 fn parse_ts(raw: Option<&str>) -> Option<DateTime<Utc>> {
     raw.and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.with_timezone(&Utc))
+}
+
+fn value_to_text(value: Option<Value>) -> Option<String> {
+    match value {
+        Some(Value::String(text)) => Some(text),
+        Some(other) => Some(other.to_string()),
+        None => None,
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -490,6 +543,7 @@ struct ClaudeMessage {
 enum Content {
     Text(String),
     Items(Vec<ContentItem>),
+    Raw(Value),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -501,6 +555,6 @@ struct ContentItem {
     name: Option<String>,
     input: Option<Value>,
     tool_use_id: Option<String>,
-    content: Option<String>,
+    content: Option<Value>,
     is_error: Option<bool>,
 }

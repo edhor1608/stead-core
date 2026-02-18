@@ -266,7 +266,15 @@ impl CodexAdapter {
     }
 
     fn session_files(&self) -> Vec<PathBuf> {
-        let sessions_root = self.base_dir.join("sessions");
+        let sessions_root = if self
+            .base_dir
+            .file_name()
+            .is_some_and(|v| v.to_string_lossy().eq_ignore_ascii_case("sessions"))
+        {
+            self.base_dir.clone()
+        } else {
+            self.base_dir.join("sessions")
+        };
         if !sessions_root.exists() {
             return Vec::new();
         }

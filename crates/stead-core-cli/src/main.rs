@@ -9,6 +9,7 @@ use twox_hash::XxHash64;
 
 use stead_session_adapters::claude::ClaudeAdapter;
 use stead_session_adapters::codex::CodexAdapter;
+use stead_session_adapters::NativeSessionRef;
 use stead_session_model::{BackendKind, SteadSession};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -275,7 +276,8 @@ fn run_sync(repo: PathBuf, codex_base: PathBuf, claude_base: PathBuf, json_out: 
     let mut imported = Vec::new();
 
     let codex = CodexAdapter::from_base_dir(codex_base);
-    for native in codex.list_sessions()? {
+    let codex_sessions = codex.list_sessions()?;
+    for native in scope_sessions_to_repo(&repo, codex_sessions) {
         let mut session = codex.import_from_file(&native.file_path)?;
         set_native_ref(&mut session, Backend::Codex, &native.native_id, &native.file_path);
         let stored = store_canonical_session(&repo, &session)?;
@@ -288,7 +290,8 @@ fn run_sync(repo: PathBuf, codex_base: PathBuf, claude_base: PathBuf, json_out: 
     }
 
     let claude = ClaudeAdapter::from_base_dir(claude_base);
-    for native in claude.list_sessions()? {
+    let claude_sessions = claude.list_sessions()?;
+    for native in scope_sessions_to_repo(&repo, claude_sessions) {
         let mut session = claude.import_session(&native.native_id)?;
         set_native_ref(&mut session, Backend::Claude, &native.native_id, &native.file_path);
         let stored = store_canonical_session(&repo, &session)?;
@@ -552,4 +555,26 @@ fn backend_key(backend: Backend) -> &'static str {
         Backend::Codex => "codex",
         Backend::Claude => "claude",
     }
+}
+
+fn scope_sessions_to_repo(repo: &Path, sessions: Vec<NativeSessionRef>) -> Vec<NativeSessionRef> {
+    let (repo_scoped, others): (Vec<_>, Vec<_>) = sessions
+        .into_iter()
+        .partition(|session| session_matches_repo(repo, session.project_root.as_deref()));
+    if repo_scoped.is_empty() {
+        others
+    } else {
+        repo_scoped
+    }
+}
+
+fn session_matches_repo(repo: &Path, project_root: Option<&str>) -> bool {
+    let Some(project_root) = project_root else {
+        return false;
+    };
+    normalize_path(repo) == normalize_path(Path::new(project_root))
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }

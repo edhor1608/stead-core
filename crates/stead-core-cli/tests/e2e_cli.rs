@@ -27,6 +27,11 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
+fn rewrite_in_file(path: &Path, from: &str, to: &str) {
+    let raw = std::fs::read_to_string(path).unwrap();
+    std::fs::write(path, raw.replace(from, to)).unwrap();
+}
+
 fn list_canonical_sessions(repo_root: &Path) -> Vec<serde_json::Value> {
     let sessions_dir = repo_root.join(".stead-core").join("sessions");
     if !sessions_dir.exists() {
@@ -317,6 +322,96 @@ fn sync_imports_codex_and_claude_sessions_into_repo_store() {
     assert!(!sessions.is_empty());
     assert!(sessions.iter().any(|s| s["source"]["backend"] == "codex"));
     assert!(sessions.iter().any(|s| s["source"]["backend"] == "claude_code"));
+}
+
+#[test]
+fn sync_accepts_leaf_backend_directories() {
+    let repo = TempDir::new().unwrap();
+    let codex_home = TempDir::new().unwrap();
+    let claude_home = TempDir::new().unwrap();
+
+    let codex_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/codex");
+    let claude_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/claude");
+    copy_tree(&codex_fixture, codex_home.path());
+    copy_tree(&claude_fixture, claude_home.path());
+
+    stead_core()
+        .args([
+            "sync",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--codex-base",
+            codex_home.path().join("sessions").to_str().unwrap(),
+            "--claude-base",
+            claude_home.path().join("projects").to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let sessions = list_canonical_sessions(repo.path());
+    assert!(!sessions.is_empty());
+    assert!(sessions.iter().any(|s| s["source"]["backend"] == "codex"));
+    assert!(sessions.iter().any(|s| s["source"]["backend"] == "claude_code"));
+}
+
+#[test]
+fn sync_scopes_to_repo_when_matching_sessions_exist() {
+    let repo = TempDir::new().unwrap();
+    let codex_home = TempDir::new().unwrap();
+    let claude_home = TempDir::new().unwrap();
+
+    let codex_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/codex");
+    let claude_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/claude");
+    copy_tree(&codex_fixture, codex_home.path());
+    copy_tree(&claude_fixture, claude_home.path());
+
+    let repo_path = repo.path().to_str().unwrap();
+    let codex_new = codex_home
+        .path()
+        .join("sessions/2026/02/17/rollout-2026-02-17T20-00-00-s-new.jsonl");
+    let codex_old = codex_home
+        .path()
+        .join("sessions/2026/02/16/rollout-2026-02-16T20-00-00-s-old.jsonl");
+    rewrite_in_file(&codex_new, "/path/to/repo", repo_path);
+    rewrite_in_file(&codex_old, "/path/to/repo", "/tmp/other-repo");
+
+    let claude_main = claude_home
+        .path()
+        .join("projects/-Users-jonas-repos-stead-core/claude-main.jsonl");
+    let claude_sub = claude_home
+        .path()
+        .join("projects/-Users-jonas-repos-stead-core/subagents/agent-a123.jsonl");
+    rewrite_in_file(&claude_main, "/path/to/repo", repo_path);
+    rewrite_in_file(&claude_sub, "/path/to/repo", repo_path);
+
+    stead_core()
+        .args([
+            "sync",
+            "--repo",
+            repo_path,
+            "--codex-base",
+            codex_home.path().to_str().unwrap(),
+            "--claude-base",
+            claude_home.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let sessions = list_canonical_sessions(repo.path());
+    assert_eq!(sessions.len(), 2);
+    assert!(sessions
+        .iter()
+        .any(|s| s["source"]["original_session_id"] == "s-new"));
+    assert!(!sessions
+        .iter()
+        .any(|s| s["source"]["original_session_id"] == "s-old"));
+    assert!(sessions
+        .iter()
+        .any(|s| s["source"]["original_session_id"] == "claude-main"));
 }
 
 #[test]
