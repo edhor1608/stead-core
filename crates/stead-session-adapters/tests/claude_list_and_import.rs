@@ -225,6 +225,50 @@ fn import_session_merges_split_files_and_preserves_lineage_payload() {
 }
 
 #[test]
+fn import_session_dedupes_split_duplicates_when_line_numbers_shift() {
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("projects").join("-Users-test-repo");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    std::fs::write(
+        project_dir.join("split-a.jsonl"),
+        concat!(
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-02-17T00:00:01Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"step one\"}]}}\n"
+        ),
+    )
+    .unwrap();
+
+    std::fs::write(
+        project_dir.join("split-b.jsonl"),
+        concat!(
+            "{\"type\":\"progress\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"p1\",\"data\":{\"stage\":\"queued\"}}\n",
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-02-17T00:00:01Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"step one\"}]}}\n",
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:02Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"message\":{\"role\":\"user\",\"content\":\"next\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    let adapter = ClaudeAdapter::from_base_dir(temp.path());
+    let session = adapter.import_session("claude-shift").expect("import");
+
+    assert_eq!(session.events.len(), 4);
+    let uuids: Vec<&str> = session
+        .events
+        .iter()
+        .filter_map(|event| {
+            event
+                .raw_vendor_payload
+                .get("uuid")
+                .and_then(|value| value.as_str())
+        })
+        .collect();
+    assert_eq!(uuids.iter().filter(|uuid| **uuid == "u1").count(), 1);
+    assert_eq!(uuids.iter().filter(|uuid| **uuid == "a1").count(), 1);
+}
+
+#[test]
 fn import_session_handles_queue_and_sidechain_variants() {
     let temp = TempDir::new().unwrap();
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
