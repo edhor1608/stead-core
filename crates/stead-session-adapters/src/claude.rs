@@ -150,13 +150,13 @@ impl ClaudeAdapter {
             match entry.entry_type.as_deref() {
                 Some("user") | Some("assistant") => {
                     if let Some(message) = entry.message {
-                        let event_uuid = entry.uuid.clone().unwrap_or_else(|| "ev".to_string());
+                        let entry_uuid = entry.uuid.clone();
+                        let event_uuid = entry_uuid.clone().unwrap_or_else(|| "ev".to_string());
                         match message.content {
                             Content::Text(text) => {
                                 if message.role == "user" && title.is_none() {
                                     title = Some(text.clone());
                                 }
-                                let raw_event_uid = event_uuid.clone();
                                 let kind = if message.role == "assistant" {
                                     EventKind::MessageAssistant
                                 } else {
@@ -177,12 +177,14 @@ impl ClaudeAdapter {
                                         .unwrap_or_else(|| json!({})),
                                     extensions: event_extensions(
                                         &source_file,
-                                        Some(raw_event_uid.as_str()),
+                                        entry_uuid.as_deref(),
                                     ),
                                 });
                             }
                             Content::Items(items) => {
                                 for (item_index, item) in items.into_iter().enumerate() {
+                                    let item_id = item.id.clone();
+                                    let item_tool_use_id = item.tool_use_id.clone();
                                     let item_discriminator = item
                                         .id
                                         .clone()
@@ -197,8 +199,11 @@ impl ClaudeAdapter {
                                         .clone()
                                         .or(item.tool_use_id.clone())
                                         .unwrap_or_else(|| event_uid.clone());
-                                    let raw_event_uid =
-                                        format!("{}-{}", event_uuid, item_discriminator);
+                                    let raw_event_uid = entry_uuid
+                                        .as_ref()
+                                        .map(|uuid| format!("{}-{}", uuid, item_discriminator))
+                                        .or(item_id.clone())
+                                        .or(item_tool_use_id.clone());
                                     match item.item_type.as_deref() {
                                         Some("text") => {
                                             if let Some(text) = item.text {
@@ -225,7 +230,7 @@ impl ClaudeAdapter {
                                                         .unwrap_or_else(|| json!({})),
                                                     extensions: event_extensions(
                                                         &source_file,
-                                                        Some(raw_event_uid.as_str()),
+                                                        raw_event_uid.as_deref(),
                                                     ),
                                                 });
                                             }
@@ -250,12 +255,14 @@ impl ClaudeAdapter {
                                                     .unwrap_or_else(|| json!({})),
                                                 extensions: event_extensions(
                                                     &source_file,
-                                                    Some(call_id.as_str()),
+                                                    raw_event_uid.as_deref(),
                                                 ),
                                             });
                                         }
                                         Some("tool_result") => {
-                                            let result_uid = format!("{}-result", raw_event_uid);
+                                            let result_uid = raw_event_uid
+                                                .as_ref()
+                                                .map(|id| format!("{id}-result"));
                                             events.push(SteadEvent {
                                                 event_uid: format!("{}-result", event_uid),
                                                 stream_id: stream_id.to_string(),
@@ -276,7 +283,7 @@ impl ClaudeAdapter {
                                                     .unwrap_or_else(|| json!({})),
                                                 extensions: event_extensions(
                                                     &source_file,
-                                                    Some(result_uid.as_str()),
+                                                    result_uid.as_deref(),
                                                 ),
                                             });
                                         }
@@ -285,8 +292,6 @@ impl ClaudeAdapter {
                                 }
                             }
                             Content::Raw(value) => {
-                                let raw_event_uid =
-                                    entry.uuid.clone().unwrap_or_else(|| "ev".to_string());
                                 let text = value.to_string();
                                 if message.role == "user" && title.is_none() {
                                     title = Some(text.clone());
@@ -315,7 +320,7 @@ impl ClaudeAdapter {
                                         .unwrap_or_else(|| json!({})),
                                     extensions: event_extensions(
                                         &source_file,
-                                        Some(raw_event_uid.as_str()),
+                                        entry_uuid.as_deref(),
                                     ),
                                 });
                             }
@@ -339,7 +344,7 @@ impl ClaudeAdapter {
                             value: entry.data.unwrap_or_else(|| json!({})),
                         },
                         raw_vendor_payload: raw_lines.last().cloned().unwrap_or_else(|| json!({})),
-                        extensions: event_extensions(&source_file, Some(progress_uid.as_str())),
+                        extensions: event_extensions(&source_file, entry.uuid.as_deref()),
                     });
                 }
                 _ => {}
