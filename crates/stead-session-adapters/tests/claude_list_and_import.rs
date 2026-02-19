@@ -223,3 +223,51 @@ fn import_session_merges_split_files_and_preserves_lineage_payload() {
             == Some("u2")
     }));
 }
+
+#[test]
+fn import_session_handles_queue_and_sidechain_variants() {
+    let temp = TempDir::new().unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("compat")
+        .join("claude")
+        .join("queue-sidechain-mixed.jsonl");
+    let path = temp
+        .path()
+        .join("projects")
+        .join("-Users-test-repo")
+        .join("queue-sidechain-mixed.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::copy(fixture, &path).unwrap();
+
+    let adapter = ClaudeAdapter::from_base_dir(temp.path());
+    let listed = adapter.list_sessions().expect("list");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].native_id, "claude-queue-sidechain");
+    assert_eq!(listed[0].title.as_deref(), Some("start from queue"));
+
+    let session = adapter
+        .import_session("claude-queue-sidechain")
+        .expect("import");
+    assert_eq!(session.source.original_session_id, "claude-queue-sidechain");
+    assert_eq!(session.events.len(), 5);
+    assert!(
+        session
+            .events
+            .iter()
+            .any(|event| event.kind == EventKind::ToolCall)
+    );
+    assert!(
+        session
+            .events
+            .iter()
+            .any(|event| event.kind == EventKind::ToolResult)
+    );
+    assert!(
+        session
+            .events
+            .iter()
+            .any(|event| event.kind == EventKind::SystemProgress)
+    );
+}

@@ -1,0 +1,7 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-02-18T12:00:00Z","sessionId":"claude-queue-sidechain","content":"queued input"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-02-18T12:00:01Z","sessionId":"claude-queue-sidechain"}
+{"type":"user","timestamp":"2026-02-18T12:00:02Z","sessionId":"claude-queue-sidechain","cwd":"/path/to/repo","uuid":"u1","isSidechain":false,"userType":"external","message":{"role":"user","content":"start from queue"}}
+{"type":"assistant","timestamp":"2026-02-18T12:00:03Z","sessionId":"claude-queue-sidechain","cwd":"/path/to/repo","uuid":"a1","isSidechain":true,"userType":"agent","message":{"role":"assistant","content":[{"type":"text","text":"agent sidechain response"}]}}
+{"type":"assistant","timestamp":"2026-02-18T12:00:04Z","sessionId":"claude-queue-sidechain","cwd":"/path/to/repo","uuid":"a2","isSidechain":false,"userType":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_q1","name":"Read","input":{"file_path":"README.md"}}]}}
+{"type":"user","timestamp":"2026-02-18T12:00:05Z","sessionId":"claude-queue-sidechain","cwd":"/path/to/repo","uuid":"u2","isSidechain":false,"userType":"external","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_q1","content":{"kind":"json","ok":true},"is_error":false}]}}
+{"type":"progress","timestamp":"2026-02-18T12:00:06Z","sessionId":"claude-queue-sidechain","cwd":"/path/to/repo","uuid":"p1","isSidechain":false,"userType":"assistant","data":{"type":"hook","phase":"post-tool"}}

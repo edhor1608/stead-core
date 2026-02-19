@@ -65,3 +65,35 @@ fn import_session_returns_not_found_even_if_other_files_are_malformed() {
         .expect_err("should return not found");
     assert!(matches!(err, AdapterError::SessionNotFound(_)));
 }
+
+#[test]
+fn import_from_file_legacy_sparse_session_meta_uses_rollout_suffix_as_session_id() {
+    let temp = TempDir::new().unwrap();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("compat")
+        .join("codex")
+        .join("legacy-sparse-session-meta.jsonl");
+    let path = temp
+        .path()
+        .join("sessions")
+        .join("2026")
+        .join("02")
+        .join("18")
+        .join("rollout-2026-02-18T11-00-00-legacy-sparse-id.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::copy(&fixture, &path).unwrap();
+
+    let adapter = CodexAdapter::from_base_dir(temp.path());
+    let session = adapter.import_from_file(&path).expect("import");
+
+    assert_eq!(session.source.original_session_id, "legacy-sparse-id");
+    assert_eq!(session.session_uid, "stead:codex:legacy-sparse-id");
+    assert_eq!(session.metadata.project_root, "/unknown");
+    assert_eq!(
+        session.events.first().unwrap().timestamp.to_rfc3339(),
+        "2026-02-18T11:00:01+00:00"
+    );
+    assert_eq!(session.events.first().unwrap().sequence, Some(0));
+}

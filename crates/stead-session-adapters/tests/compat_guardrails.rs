@@ -43,6 +43,15 @@ fn codex_roundtrip_preserves_unknown_fields() {
         message_line["payload"]["vendor_extras"]["flag"],
         json!(true)
     );
+
+    let session_meta = lines
+        .iter()
+        .find(|line| line.get("type") == Some(&json!("session_meta")))
+        .unwrap();
+    assert!(session_meta["payload"]["source"].is_string());
+    assert!(session_meta["payload"]["originator"].is_string());
+    assert!(session_meta["payload"]["cli_version"].is_string());
+    assert!(session_meta["payload"]["timestamp"].is_string());
 }
 
 #[test]

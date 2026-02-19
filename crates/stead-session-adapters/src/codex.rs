@@ -194,9 +194,7 @@ impl CodexAdapter {
 
         canonical_sort_events(&mut events);
         let original_id = original_id.unwrap_or_else(|| {
-            path.as_ref()
-                .file_stem()
-                .and_then(|v| v.to_str())
+            infer_rollout_session_id(path.as_ref())
                 .unwrap_or("unknown")
                 .to_string()
         });
@@ -451,8 +449,7 @@ fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
 
     Ok(NativeSessionRef {
         native_id: id.unwrap_or_else(|| {
-            path.file_stem()
-                .and_then(|v| v.to_str())
+            infer_rollout_session_id(path)
                 .unwrap_or("unknown")
                 .to_string()
         }),
@@ -466,6 +463,29 @@ fn parse_summary(path: &Path) -> Result<NativeSessionRef, AdapterError> {
 fn parse_ts(raw: Option<&str>) -> Option<DateTime<Utc>> {
     raw.and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.with_timezone(&Utc))
+}
+
+fn infer_rollout_session_id(path: &Path) -> Option<&str> {
+    let stem = path.file_stem()?.to_str()?;
+    let prefix = "rollout-";
+    let trimmed = stem.strip_prefix(prefix).unwrap_or(stem);
+    let bytes = trimmed.as_bytes();
+    if bytes.len() > 20
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[13] == b'-'
+        && bytes[16] == b'-'
+        && bytes[19] == b'-'
+        && bytes
+            .iter()
+            .take(19)
+            .enumerate()
+            .all(|(idx, ch)| [4usize, 7, 10, 13, 16].contains(&idx) || ch.is_ascii_digit())
+    {
+        return Some(&trimmed[20..]);
+    }
+    Some(stem)
 }
 
 fn extract_message_texts(content: &Option<Vec<CodexContent>>) -> Vec<String> {
