@@ -313,9 +313,11 @@
 ## Follow-up: CodeRabbit Comment Sweep (2026-02-19)
 
 ### Problem solved
+
 - Validate and process any remaining actionable CodeRabbit findings after M12 merged.
 
 ### What was implemented
+
 - Scanned merged PRs for CodeRabbit comments and filtered out non-actionable "review failed/rate-limited" notices.
 - Added a regression test proving Claude split-session dedupe must not rely on file-local line numbers:
   - `import_session_dedupes_split_duplicates_when_line_numbers_shift`
@@ -326,16 +328,19 @@
   - file: `crates/stead-session-adapters/src/claude.rs`
 
 ### Key decisions
+
 - Keep the fix scoped to one verified, still-valid finding (duplicate events across split files when line offsets differ).
 - Avoid broad refactor/nitpick changes from historical comments that do not affect correctness.
 
 ### Verification
+
 - `cargo test -p stead-session-adapters import_session_dedupes_split_duplicates_when_line_numbers_shift`
 - `cargo test --workspace`
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 
 ### Follow-up update
+
 - Addressed a new CodeRabbit finding on this PR: avoid sentinel `"ev"` as `raw_event_uid` when entry UUID is missing.
 - Added regression:
   - `import_session_keeps_distinct_messages_when_uuid_is_missing`
