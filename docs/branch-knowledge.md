@@ -226,3 +226,28 @@
 ### Lessons learned
 - Claude split-history behavior can be represented in canonical form without inventing backend-specific rewind commands in core.
 - Merge-before-sort and identity dedupe is necessary to avoid duplicate events when importing split files.
+
+## Milestone 10: Edge-Case Fixtures + Contract Hardening
+
+### Problem solved
+- Improve adapter robustness for legacy/sparse session files and mixed vendor envelope shapes found in real local histories.
+- Lock explicit export contracts needed for resumable native sessions across backends.
+
+### What was implemented
+- Added compat fixtures:
+  - Codex: `legacy-sparse-session-meta.jsonl` (missing `session_meta.payload.id/cwd`, mixed ordering, unknown nested payload fields).
+  - Claude: `queue-sidechain-mixed.jsonl` (queue-operation lines, sidechain/userType variants, mixed tool payload content).
+- Added adapter tests:
+  - Codex import infers native id from rollout filename suffix when `session_meta.payload.id` is absent.
+  - Claude import/list handles queue/sidechain variants without losing core events.
+  - Codex export guardrail asserts `session_meta.payload` includes `source`, `originator`, `cli_version`, and `timestamp`.
+- Hardened Codex adapter fallback id inference:
+  - rollout filenames like `rollout-YYYY-MM-DDTHH-MM-SS-<native-id>.jsonl` now infer `<native-id>` (including hyphenated IDs) instead of using full filename stem.
+
+### Key decisions
+- Keep fallback inference strictly scoped to known rollout naming format; if not matched, preserve previous full-stem fallback.
+- Preserve unknown nested payload fields by existing raw merge logic instead of introducing new vendor-specific schema handling.
+
+### Lessons learned
+- Legacy Codex files can be resumable even without explicit `session_meta.payload.id`; filename inference is required to keep stable canonical IDs.
+- Claude queue-operation lines should be tolerated as non-event envelopes while still allowing session discovery/title extraction from later user lines.

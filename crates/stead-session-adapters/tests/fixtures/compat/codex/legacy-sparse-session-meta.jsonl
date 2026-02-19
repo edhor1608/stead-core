@@ -1,0 +1,5 @@
+{"timestamp":"2026-02-18T11:00:00Z","type":"session_meta","payload":{"model_provider":"legacy","vendor":{"legacy_mode":true}}}
+{"timestamp":"2026-02-18T11:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ready"}],"extra":{"trace":"a"}}}
+{"timestamp":"2026-02-18T11:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"legacy prompt"}],"extra":{"trace":"u"}}}
+{"timestamp":"2026-02-18T11:00:02Z","type":"response_item","payload":{"type":"function_call","name":"Read","call_id":"tool-legacy","arguments":"{\"file_path\":\"README.md\"}","extra":{"nested":{"keep":"yes"}}}}
+{"timestamp":"2026-02-18T11:00:04Z","type":"response_item","payload":{"type":"function_call_output","call_id":"tool-legacy","output":"ok"}}
