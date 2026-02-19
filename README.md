@@ -28,6 +28,7 @@ schemas/
 docs/
   SESSION_STANDARD.md
   DESIGN_RATIONALE.md
+  MANUAL_DRIFT_REVIEW.md
   branch-knowledge.md
 ```
 
@@ -35,6 +36,12 @@ docs/
 
 ```bash
 cargo test --workspace
+```
+
+Non-mutating maintainer verification:
+
+```bash
+./scripts/non_mutating_verify.sh /path/to/target/repo
 ```
 
 ## CLI usage
