@@ -176,6 +176,48 @@ fn claude_roundtrip_keeps_event_ids_timestamps_and_tool_links() {
     assert_eq!(imported_progress_ids, reimported_progress_ids);
 }
 
+#[test]
+fn claude_export_from_codex_session_emits_resume_compatible_metadata() {
+    let temp = TempDir::new().unwrap();
+    let codex_fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex");
+    copy_tree(&codex_fixture, temp.path());
+
+    let codex = CodexAdapter::from_base_dir(temp.path());
+    let session = codex.import_session("s-new").unwrap();
+
+    let claude = ClaudeAdapter::from_base_dir(temp.path());
+    let out = temp.path().join("claude-from-codex.jsonl");
+    claude.export_session(&session, &out).unwrap();
+    let lines = parse_jsonl(&out);
+
+    assert!(!lines.is_empty());
+    assert!(lines[0].get("parentUuid").is_some());
+    assert!(lines[0]["parentUuid"].is_null());
+    for (idx, line) in lines.iter().enumerate() {
+        assert!(
+            line.get("sessionId").is_some(),
+            "missing sessionId at {idx}"
+        );
+        assert!(line.get("cwd").is_some(), "missing cwd at {idx}");
+        assert!(
+            line.get("isSidechain").is_some(),
+            "missing isSidechain at {idx}"
+        );
+        assert!(line.get("userType").is_some(), "missing userType at {idx}");
+        assert!(line.get("version").is_some(), "missing version at {idx}");
+        assert!(
+            line.get("gitBranch").is_some(),
+            "missing gitBranch at {idx}"
+        );
+        if line.get("type") == Some(&json!("user")) {
+            assert!(
+                line.get("permissionMode").is_some(),
+                "missing permissionMode at {idx}"
+            );
+        }
+    }
+}
+
 fn copy_tree(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
     for entry in walkdir::WalkDir::new(from) {
