@@ -281,3 +281,31 @@
 ### Lessons learned
 - Existing upsert/alias/native-ref logic is stable across repeated crossover loops under stress tests.
 - Real-device runs still emit non-fatal MCP startup warnings (e.g., stale Notion token), but resume/sync semantics remain correct.
+
+## Milestone 12: Release Guardrails + Manual Drift Process
+
+### Problem solved
+- Convert hardening validation into repeatable maintainer operations instead of ad-hoc checks.
+- Ensure drift detection and interop acceptance criteria are documented and reproducible.
+
+### What was implemented
+- Added manual drift-review playbook:
+  - `docs/MANUAL_DRIFT_REVIEW.md`
+  - cadence (`bi-weekly` + `pre-release`) and severity rubric (`S0`–`S3`),
+  - response workflow for hotfix vs batch handling.
+- Added reproducible non-mutating verification script:
+  - `scripts/non_mutating_verify.sh`
+  - runs test/fmt/clippy and backend session listing checks.
+- Added hardening release baseline and verification report:
+  - `docs/release-baseline-v0.1.0-m2.md`
+  - `docs/m12-verification-report-2026-02-19.md`
+- Updated user-facing docs:
+  - `README.md` now links manual drift artifacts and verification script.
+  - `CHANGELOG.md` now includes `v0.1.0-m2`.
+
+### Key decisions
+- Keep drift checks local-first and CLI-native; no vendor API dependence introduced.
+- Keep verification script non-mutating for repo-tracked state so maintainers can run checks safely at any time.
+
+### Lessons learned
+- Operational reliability depends as much on documented repeatable checks as on code-level tests.
