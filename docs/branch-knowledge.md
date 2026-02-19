@@ -251,3 +251,33 @@
 ### Lessons learned
 - Legacy Codex files can be resumable even without explicit `session_meta.payload.id`; filename inference is required to keep stable canonical IDs.
 - Claude queue-operation lines should be tolerated as non-event envelopes while still allowing session discovery/title extraction from later user lines.
+
+## Milestone 11: Long-Session Stress + Reliability
+
+### Problem solved
+- Validate adapter and CLI behavior on larger timelines and repeated cross-backend resume/sync cycles.
+- Confirm canonical store stability under repeated materialize/resume/sync loops (no duplicate explosion).
+
+### What was implemented
+- Added high-volume adapter stress suite:
+  - `crates/stead-session-adapters/tests/stress_roundtrip.rs`
+  - Codex stress case: 120 user/assistant turns + periodic tool call/result pairs.
+  - Claude stress case: 100 user/assistant turns + queue-operation + periodic progress/sidechain variants.
+  - Both enforce import/export/import event-count stability and contiguous sequences.
+- Added CLI stress e2e:
+  - `crates/stead-core-cli/tests/stress_cli.rs`
+  - Repeated crossover cycles (`materialize` + `resume` + `sync`) on both canonical roots.
+  - Asserts canonical store count remains stable and both target sessions retain cross-backend native refs.
+- Executed practical real-device stress flow in fresh repo:
+  - `/Users/jonas/repos/stead-core-live-m11`
+  - two crossover rounds each direction with marker checks,
+  - post-crossover prompts added,
+  - final sync preserved canonical count (`COUNT_A=2`, `COUNT_B=2`, `UNIQ_B=2`).
+
+### Key decisions
+- Stress generation is test-local (programmatic) to avoid committing large static fixture files.
+- Reliability assertions focus on canonical session count and reference integrity for participating sessions, not every unrelated baseline session.
+
+### Lessons learned
+- Existing upsert/alias/native-ref logic is stable across repeated crossover loops under stress tests.
+- Real-device runs still emit non-fatal MCP startup warnings (e.g., stale Notion token), but resume/sync semantics remain correct.
