@@ -2,6 +2,8 @@
 
 Vendor-neutral core for importing, normalizing, and exporting local AI coding sessions.
 
+Part of the broader Stead project: [edhor1608/stead](https://github.com/edhor1608/stead).
+
 `stead-core` provides:
 - a canonical, versioned session model (`schemas/session.v0.1.0.schema.json`),
 - adapters for Codex and Claude Code local session formats,

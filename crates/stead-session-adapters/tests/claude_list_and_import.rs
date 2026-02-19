@@ -1,6 +1,6 @@
 use stead_session_adapters::AdapterError;
 use stead_session_adapters::claude::ClaudeAdapter;
-use stead_session_model::EventKind;
+use stead_session_model::{EventKind, EventPayload};
 use tempfile::TempDir;
 
 mod common;
@@ -222,6 +222,82 @@ fn import_session_merges_split_files_and_preserves_lineage_payload() {
             .and_then(|value| value.as_str())
             == Some("u2")
     }));
+}
+
+#[test]
+fn import_session_dedupes_split_duplicates_when_line_numbers_shift() {
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("projects").join("-Users-test-repo");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    std::fs::write(
+        project_dir.join("split-a.jsonl"),
+        concat!(
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-02-17T00:00:01Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"step one\"}]}}\n"
+        ),
+    )
+    .unwrap();
+
+    std::fs::write(
+        project_dir.join("split-b.jsonl"),
+        concat!(
+            "{\"type\":\"progress\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"p1\",\"data\":{\"stage\":\"queued\"}}\n",
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-02-17T00:00:01Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"step one\"}]}}\n",
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:02Z\",\"sessionId\":\"claude-shift\",\"cwd\":\"/Users/test/repo\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"message\":{\"role\":\"user\",\"content\":\"next\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    let adapter = ClaudeAdapter::from_base_dir(temp.path());
+    let session = adapter.import_session("claude-shift").expect("import");
+
+    assert_eq!(session.events.len(), 4);
+    let uuids: Vec<&str> = session
+        .events
+        .iter()
+        .filter_map(|event| {
+            event
+                .raw_vendor_payload
+                .get("uuid")
+                .and_then(|value| value.as_str())
+        })
+        .collect();
+    assert_eq!(uuids.iter().filter(|uuid| **uuid == "u1").count(), 1);
+    assert_eq!(uuids.iter().filter(|uuid| **uuid == "a1").count(), 1);
+}
+
+#[test]
+fn import_session_keeps_distinct_messages_when_uuid_is_missing() {
+    let temp = TempDir::new().unwrap();
+    let project_dir = temp.path().join("projects").join("-Users-test-repo");
+    std::fs::create_dir_all(&project_dir).unwrap();
+
+    std::fs::write(
+        project_dir.join("no-uuid.jsonl"),
+        concat!(
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"sessionId\":\"claude-no-uuid\",\"cwd\":\"/Users/test/repo\",\"message\":{\"role\":\"user\",\"content\":\"first\"}}\n",
+            "{\"type\":\"user\",\"timestamp\":\"2026-02-17T00:00:01Z\",\"sessionId\":\"claude-no-uuid\",\"cwd\":\"/Users/test/repo\",\"message\":{\"role\":\"user\",\"content\":\"second\"}}\n",
+            "{\"type\":\"assistant\",\"timestamp\":\"2026-02-17T00:00:02Z\",\"sessionId\":\"claude-no-uuid\",\"cwd\":\"/Users/test/repo\",\"message\":{\"role\":\"assistant\",\"content\":\"ok\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    let adapter = ClaudeAdapter::from_base_dir(temp.path());
+    let session = adapter.import_session("claude-no-uuid").expect("import");
+
+    assert_eq!(session.events.len(), 3);
+    let user_texts: Vec<&str> = session
+        .events
+        .iter()
+        .filter(|event| event.kind == EventKind::MessageUser)
+        .filter_map(|event| match &event.payload {
+            EventPayload::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(user_texts, vec!["first", "second"]);
 }
 
 #[test]
