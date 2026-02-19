@@ -39,6 +39,7 @@ fn valid_session() -> SteadSession {
         artifacts: vec![],
         capabilities: serde_json::Map::new(),
         extensions: serde_json::Map::new(),
+        shared_session_uid: Some("stead:shared:s1".to_string()),
         lineage: Some(SessionLineage {
             root_session_uid: Some(build_session_uid(BackendKind::Codex, "root")),
             parent_session_uid: Some(build_session_uid(BackendKind::Codex, "parent")),

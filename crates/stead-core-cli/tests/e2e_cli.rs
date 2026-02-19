@@ -4,6 +4,7 @@ use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
+use uuid::Uuid;
 
 #[allow(deprecated)]
 fn stead_core() -> Command {
@@ -744,4 +745,421 @@ fn handoff_materializes_target_backend_before_resume_when_needed() {
     assert!(logged.contains("--resume"));
     assert!(logged.contains(native_id));
     assert!(logged.contains("Continue in claude"));
+}
+
+#[test]
+fn sync_backfills_shared_session_uid() {
+    let repo = TempDir::new().unwrap();
+    let codex_home = TempDir::new().unwrap();
+    let claude_home = TempDir::new().unwrap();
+
+    let codex_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/codex");
+    let claude_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/claude");
+    copy_tree(&codex_fixture, codex_home.path());
+    copy_tree(&claude_fixture, claude_home.path());
+
+    stead_core()
+        .args([
+            "sync",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--codex-base",
+            codex_home.path().to_str().unwrap(),
+            "--claude-base",
+            claude_home.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let sessions = list_canonical_sessions(repo.path());
+    assert!(!sessions.is_empty());
+    for session in sessions {
+        assert_eq!(session["shared_session_uid"], session["session_uid"]);
+    }
+}
+
+#[test]
+fn materialize_uses_uuid_native_ids_for_cross_backend_targets() {
+    let repo = TempDir::new().unwrap();
+    let codex_home = TempDir::new().unwrap();
+    let claude_home = TempDir::new().unwrap();
+
+    let codex_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/codex");
+    let claude_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/claude");
+    copy_tree(&codex_fixture, codex_home.path());
+    copy_tree(&claude_fixture, claude_home.path());
+
+    stead_core()
+        .args([
+            "sync",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--codex-base",
+            codex_home.path().to_str().unwrap(),
+            "--claude-base",
+            claude_home.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let sessions = list_canonical_sessions(repo.path());
+    let codex_session = sessions
+        .iter()
+        .find(|s| s["source"]["backend"] == "codex")
+        .unwrap();
+    let claude_session = sessions
+        .iter()
+        .find(|s| s["source"]["backend"] == "claude_code")
+        .unwrap();
+
+    let codex_uid = codex_session["session_uid"].as_str().unwrap();
+    let claude_uid = claude_session["session_uid"].as_str().unwrap();
+
+    let codex_to_claude = stead_core()
+        .args([
+            "materialize",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--session",
+            codex_uid,
+            "--to",
+            "claude",
+            "--base-dir",
+            claude_home.path().to_str().unwrap(),
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let codex_to_claude: Value = serde_json::from_slice(&codex_to_claude).unwrap();
+    let claude_native_id = codex_to_claude["native_id"].as_str().unwrap();
+    let claude_out = codex_to_claude["output_path"].as_str().unwrap();
+    assert!(Uuid::parse_str(claude_native_id).is_ok());
+    assert!(claude_out.ends_with(&format!("{claude_native_id}.jsonl")));
+
+    let claude_to_codex = stead_core()
+        .args([
+            "materialize",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--session",
+            claude_uid,
+            "--to",
+            "codex",
+            "--base-dir",
+            codex_home.path().to_str().unwrap(),
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let claude_to_codex: Value = serde_json::from_slice(&claude_to_codex).unwrap();
+    let codex_native_id = claude_to_codex["native_id"].as_str().unwrap();
+    let codex_out = claude_to_codex["output_path"].as_str().unwrap();
+    assert!(Uuid::parse_str(codex_native_id).is_ok());
+    assert!(codex_out.contains("/sessions/"));
+    assert!(codex_out.contains("/rollout-"));
+    assert!(codex_out.ends_with(&format!("-{codex_native_id}.jsonl")));
+}
+
+#[test]
+fn materialize_to_codex_prunes_stale_same_id_rollouts() {
+    let repo = TempDir::new().unwrap();
+    let codex_home = TempDir::new().unwrap();
+    let claude_home = TempDir::new().unwrap();
+
+    let codex_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/codex");
+    let claude_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/claude");
+    copy_tree(&codex_fixture, codex_home.path());
+    copy_tree(&claude_fixture, claude_home.path());
+
+    stead_core()
+        .args([
+            "sync",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--codex-base",
+            codex_home.path().to_str().unwrap(),
+            "--claude-base",
+            claude_home.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let sessions = list_canonical_sessions(repo.path());
+    let claude_session = sessions
+        .iter()
+        .find(|s| s["source"]["backend"] == "claude_code")
+        .unwrap();
+    let canonical_id = claude_session["session_uid"].as_str().unwrap();
+    let shared_uid = claude_session["shared_session_uid"].as_str().unwrap();
+    let predicted_id = Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("stead-native:codex:{shared_uid}").as_bytes(),
+    )
+    .to_string();
+
+    let stale = codex_home.path().join(format!(
+        "sessions/2026/02/17/rollout-stale-{predicted_id}.jsonl"
+    ));
+    if let Some(parent) = stale.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(
+        &stale,
+        format!(
+            "{{\"type\":\"session_meta\",\"timestamp\":\"2026-02-17T00:00:00Z\",\"payload\":{{\"id\":\"{predicted_id}\",\"cwd\":\"{}\",\"model_provider\":\"unknown\"}}}}\n",
+            repo.path().display()
+        ),
+    )
+    .unwrap();
+
+    let output = stead_core()
+        .args([
+            "materialize",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--session",
+            canonical_id,
+            "--to",
+            "codex",
+            "--base-dir",
+            codex_home.path().to_str().unwrap(),
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let materialized: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(materialized["native_id"].as_str().unwrap(), predicted_id);
+
+    let mut matches = Vec::new();
+    for entry in walkdir::WalkDir::new(codex_home.path())
+        .into_iter()
+        .flatten()
+    {
+        if !entry.path().is_file() {
+            continue;
+        }
+        let Some(name) = entry.path().file_name().and_then(|v| v.to_str()) else {
+            continue;
+        };
+        if name.ends_with(&format!("-{predicted_id}.jsonl")) {
+            matches.push(entry.path().to_path_buf());
+        }
+    }
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected stale rollout files to be pruned"
+    );
+    let first_line = std::fs::read_to_string(&matches[0])
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap()
+        .to_string();
+    assert!(first_line.contains("\"originator\""));
+}
+
+#[test]
+fn sync_upserts_cross_backend_materialized_sessions_instead_of_creating_duplicates() {
+    let repo = TempDir::new().unwrap();
+    let codex_home = TempDir::new().unwrap();
+    let claude_home = TempDir::new().unwrap();
+
+    let codex_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/codex");
+    let claude_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/claude");
+    copy_tree(&codex_fixture, codex_home.path());
+    copy_tree(&claude_fixture, claude_home.path());
+
+    stead_core()
+        .args([
+            "sync",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--codex-base",
+            codex_home.path().to_str().unwrap(),
+            "--claude-base",
+            claude_home.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let sessions = list_canonical_sessions(repo.path());
+    let codex_session = sessions
+        .iter()
+        .find(|s| s["source"]["backend"] == "codex")
+        .unwrap();
+    let canonical_id = codex_session["session_uid"].as_str().unwrap();
+
+    stead_core()
+        .args([
+            "materialize",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--session",
+            canonical_id,
+            "--to",
+            "claude",
+            "--base-dir",
+            claude_home.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let before = list_canonical_sessions(repo.path());
+    let before_count = before.len();
+
+    stead_core()
+        .args([
+            "sync",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--codex-base",
+            codex_home.path().to_str().unwrap(),
+            "--claude-base",
+            claude_home.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let refreshed = list_canonical_sessions(repo.path());
+    assert_eq!(refreshed.len(), before_count);
+
+    let updated = refreshed
+        .iter()
+        .find(|s| s["session_uid"] == canonical_id)
+        .unwrap();
+    assert!(updated["extensions"]["native_refs"]["codex"]["session_id"].is_string());
+    assert!(updated["extensions"]["native_refs"]["claude"]["session_id"].is_string());
+}
+
+#[test]
+#[cfg(unix)]
+fn resume_uses_real_backend_command_shape_and_repo_cwd() {
+    let repo = TempDir::new().unwrap();
+    let codex_home = TempDir::new().unwrap();
+    let claude_home = TempDir::new().unwrap();
+
+    let codex_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/codex");
+    let claude_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../stead-session-adapters/tests/fixtures/claude");
+    copy_tree(&codex_fixture, codex_home.path());
+    copy_tree(&claude_fixture, claude_home.path());
+
+    stead_core()
+        .args([
+            "sync",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--codex-base",
+            codex_home.path().to_str().unwrap(),
+            "--claude-base",
+            claude_home.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let sessions = list_canonical_sessions(repo.path());
+    let codex_session = sessions
+        .iter()
+        .find(|s| s["source"]["backend"] == "codex")
+        .unwrap();
+    let claude_session = sessions
+        .iter()
+        .find(|s| s["source"]["backend"] == "claude_code")
+        .unwrap();
+    let codex_uid = codex_session["session_uid"].as_str().unwrap();
+    let claude_uid = claude_session["session_uid"].as_str().unwrap();
+
+    let codex_log = repo.path().join("fake-codex.log");
+    let codex_bin = repo.path().join("fake-codex.sh");
+    std::fs::write(
+        &codex_bin,
+        format!(
+            "#!/bin/sh\npwd > \"{}\"\nprintf '%s\\n' \"$@\" >> \"{}\"\n",
+            codex_log.display(),
+            codex_log.display()
+        ),
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&codex_bin).unwrap().permissions();
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&codex_bin, perms).unwrap();
+
+    let claude_log = repo.path().join("fake-claude.log");
+    let claude_bin = repo.path().join("fake-claude.sh");
+    std::fs::write(
+        &claude_bin,
+        format!(
+            "#!/bin/sh\npwd > \"{}\"\nprintf '%s\\n' \"$@\" >> \"{}\"\n",
+            claude_log.display(),
+            claude_log.display()
+        ),
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&claude_bin).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&claude_bin, perms).unwrap();
+
+    stead_core()
+        .env("STEAD_CORE_CODEX_BIN", codex_bin.to_str().unwrap())
+        .args([
+            "resume",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--session",
+            codex_uid,
+            "--backend",
+            "codex",
+            "--prompt",
+            "Continue in codex",
+        ])
+        .assert()
+        .success();
+
+    let codex_logged = std::fs::read_to_string(&codex_log).unwrap();
+    assert!(codex_logged.contains(repo.path().to_str().unwrap()));
+    assert!(codex_logged.contains("\nexec\n"));
+    assert!(codex_logged.contains("\nresume\n"));
+    assert!(codex_logged.contains("Continue in codex"));
+
+    stead_core()
+        .env("STEAD_CORE_CLAUDE_BIN", claude_bin.to_str().unwrap())
+        .args([
+            "resume",
+            "--repo",
+            repo.path().to_str().unwrap(),
+            "--session",
+            claude_uid,
+            "--backend",
+            "claude",
+            "--prompt",
+            "Continue in claude",
+        ])
+        .assert()
+        .success();
+
+    let claude_logged = std::fs::read_to_string(&claude_log).unwrap();
+    assert!(claude_logged.contains(repo.path().to_str().unwrap()));
+    assert!(claude_logged.contains("\n-p\n"));
+    assert!(claude_logged.contains("\n-r\n"));
+    assert!(claude_logged.contains("Continue in claude"));
 }

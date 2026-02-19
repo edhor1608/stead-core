@@ -201,6 +201,8 @@ pub struct SessionLineage {
 pub struct SteadSession {
     pub schema_version: String,
     pub session_uid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_session_uid: Option<String>,
     pub source: SessionSource,
     pub metadata: SessionMetadata,
     pub events: Vec<SteadEvent>,

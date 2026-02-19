@@ -339,6 +339,7 @@ impl ClaudeAdapter {
         Ok(SteadSession {
             schema_version: schema_version().to_string(),
             session_uid: build_session_uid(BackendKind::ClaudeCode, &session_id),
+            shared_session_uid: None,
             source: SessionSource::new(
                 BackendKind::ClaudeCode,
                 &session_id,
@@ -365,6 +366,11 @@ impl ClaudeAdapter {
         output_path: impl AsRef<Path>,
     ) -> Result<ExportReport, AdapterError> {
         let mut file = File::create(output_path.as_ref())?;
+        let claude_version =
+            first_raw_string_field(session, "version").unwrap_or_else(|| "2.1.47".to_string());
+        let git_branch =
+            first_raw_string_field(session, "gitBranch").unwrap_or_else(|| "main".to_string());
+        let mut parent_uuid: Option<String> = None;
 
         for event in &session.events {
             let line = merge_with_raw_unknowns(
@@ -372,9 +378,16 @@ impl ClaudeAdapter {
                     event,
                     &session.source.original_session_id,
                     &session.metadata.project_root,
+                    parent_uuid.as_deref(),
+                    &claude_version,
+                    &git_branch,
                 ),
                 Some(&event.raw_vendor_payload),
             );
+            parent_uuid = line
+                .get("uuid")
+                .and_then(|value| value.as_str())
+                .map(ToString::to_string);
             writeln!(file, "{}", serde_json::to_string(&line)?)?;
         }
 
@@ -414,33 +427,43 @@ impl ClaudeAdapter {
     }
 }
 
-fn event_to_claude_line(event: &SteadEvent, session_id: &str, cwd: &str) -> Value {
+fn event_to_claude_line(
+    event: &SteadEvent,
+    session_id: &str,
+    cwd: &str,
+    parent_uuid: Option<&str>,
+    claude_version: &str,
+    git_branch: &str,
+) -> Value {
     let timestamp = event.timestamp.to_rfc3339();
+    let base = json!({
+        "parentUuid": parent_uuid,
+        "isSidechain": false,
+        "userType": "external",
+        "cwd": cwd,
+        "sessionId": session_id,
+        "version": claude_version,
+        "gitBranch": git_branch,
+        "timestamp": timestamp,
+        "uuid": event.event_uid
+    });
+
+    let with_base = |specific: Value| merge_value_objects(base.clone(), specific);
+
     match (&event.kind, &event.payload) {
-        (EventKind::MessageUser, EventPayload::Text { text }) => json!({
+        (EventKind::MessageUser, EventPayload::Text { text }) => with_base(json!({
             "type": "user",
-            "timestamp": timestamp,
-            "sessionId": session_id,
-            "cwd": cwd,
-            "uuid": event.event_uid,
+            "permissionMode": "default",
             "message": { "role": "user", "content": text }
-        }),
-        (EventKind::MessageAssistant, EventPayload::Text { text }) => json!({
+        })),
+        (EventKind::MessageAssistant, EventPayload::Text { text }) => with_base(json!({
             "type": "assistant",
-            "timestamp": timestamp,
-            "sessionId": session_id,
-            "cwd": cwd,
-            "uuid": event.event_uid,
             "message": { "role": "assistant", "content": [{ "type": "text", "text": text }] }
-        }),
-        (EventKind::ToolCall, EventPayload::ToolCall { tool_name, input }) => json!({
+        })),
+        (EventKind::ToolCall, EventPayload::ToolCall { tool_name, input }) => with_base(json!({
             "type": "assistant",
-            "timestamp": timestamp,
-            "sessionId": session_id,
-            "cwd": cwd,
-            "uuid": event.event_uid,
             "message": { "role": "assistant", "content": [{ "type": "tool_use", "id": event.event_uid, "name": tool_name, "input": input }] }
-        }),
+        })),
         (
             EventKind::ToolResult,
             EventPayload::ToolResult {
@@ -449,12 +472,9 @@ fn event_to_claude_line(event: &SteadEvent, session_id: &str, cwd: &str) -> Valu
                 ok,
                 ..
             },
-        ) => json!({
+        ) => with_base(json!({
             "type": "user",
-            "timestamp": timestamp,
-            "sessionId": session_id,
-            "cwd": cwd,
-            "uuid": event.event_uid,
+            "permissionMode": "default",
             "message": {
                 "role": "user",
                 "content": [{
@@ -464,22 +484,14 @@ fn event_to_claude_line(event: &SteadEvent, session_id: &str, cwd: &str) -> Valu
                     "is_error": !ok
                 }]
             }
-        }),
-        (EventKind::SystemProgress, EventPayload::Json { value }) => json!({
+        })),
+        (EventKind::SystemProgress, EventPayload::Json { value }) => with_base(json!({
             "type": "progress",
-            "timestamp": timestamp,
-            "sessionId": session_id,
-            "cwd": cwd,
-            "uuid": event.event_uid,
             "data": value
-        }),
-        _ => json!({
+        })),
+        _ => with_base(json!({
             "type": "system",
-            "timestamp": timestamp,
-            "sessionId": session_id,
-            "cwd": cwd,
-            "uuid": event.event_uid
-        }),
+        })),
     }
 }
 
@@ -648,6 +660,19 @@ fn value_to_text(value: Option<Value>) -> Option<String> {
         Some(other) => Some(other.to_string()),
         None => None,
     }
+}
+
+fn first_raw_string_field(session: &SteadSession, field: &str) -> Option<String> {
+    session
+        .raw_vendor_payload
+        .get("lines")
+        .and_then(|value| value.as_array())
+        .and_then(|lines| {
+            lines
+                .iter()
+                .find_map(|line| line.get(field).and_then(|v| v.as_str()))
+        })
+        .map(ToString::to_string)
 }
 
 #[derive(Debug, Clone, Deserialize)]
