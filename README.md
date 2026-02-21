@@ -127,3 +127,14 @@ stead-core handoff \
   --base-dir ~/.claude \
   --resume "Continue from previous state"
 ```
+
+<!-- status:start -->
+## Status
+- State: active
+- Summary: Define current milestone.
+- Next: Define next concrete step.
+- Updated: 2026-02-21
+- Branch: `main`
+- Working Tree: dirty (4 files)
+- Last Commit: 680ef11 (2026-02-19) Harden Claude dedupe identity and add CODEOWNERS (#14)
+<!-- status:end -->
